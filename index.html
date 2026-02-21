@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lunelia Esthetics - Services</title>
+<link rel="stylesheet" href="styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+    <h1>Lunelia Esthetics</h1>
+    <h2>Corrective Skincare & Precision Waxing</h2>
+    <p>Licensed Master Esthetician</p>
+</header>
+
+<nav class="services-nav" aria-label="Service categories">
+    <ul>
+        <li><a href="#facial-waxing" data-target="facial-waxing">Facial Waxing</a></li>
+        <li><a href="#full-body-waxing" data-target="full-body-waxing">Full Body Waxing</a></li>
+        <li><a href="#intimate-waxing" data-target="intimate-waxing">Intimate Waxing</a></li>
+        <li><a href="#corrective-facial" data-target="corrective-facial">Corrective Facials</a></li>
+        <li><a href="#enhancement-addons" data-target="enhancement-addons">Enhancements</a></li>
+        <li><a href="#chemical-peels" data-target="chemical-peels">Chemical Peels</a></li>
+    </ul>
+</nav>
+
+<main id="main-content">
+<section class="specials">
+    <h3>✨ New Client Special ✨</h3>
+    <p><strong>First Brazilian just $55</strong></p>
+    <p><strong>First Bikini just $48</strong></p>
+    <p><strong>Wax Pass:</strong> Buy 9 services, get your 10th free! (Never Expires)</p>
+    <p><strong>Refer a Friend:</strong> You both get $10 off your next service</p>
+</section>
+
+
+<section class="services">
+    <h3> Services Offered </h3>
+    <h3 class="category-header" role="button" tabindex="0" aria-expanded="false" aria-controls="facial-waxing">Facial Waxing</h3>
+    <div class="service-category" id="facial-waxing" aria-hidden="true"></div>
+
+    <h3 class="category-header" role="button" tabindex="0" aria-expanded="false" aria-controls="full-body-waxing">Full Body Waxing</h3>
+    <div class="service-category" id="full-body-waxing" aria-hidden="true"></div>
+
+    <h3 class="category-header" role="button" tabindex="0" aria-expanded="false" aria-controls="intimate-waxing">Intimate Waxing</h3>
+    <div class="service-category" id="intimate-waxing" aria-hidden="true"></div>
+
+    <h3 class="category-header" role="button" tabindex="0" aria-expanded="false" aria-controls="corrective-facial">Corrective Facial Services</h3>
+    <div class="service-category" id="corrective-facial" aria-hidden="true"></div>
+
+    <h3 class="category-header" role="button" tabindex="0" aria-expanded="false" aria-controls="enhancement-addons">Enhancement Addons</h3>
+    <div class="service-category" id="enhancement-addons" aria-hidden="true"></div>
+
+    <h3 class="category-header" role="button" tabindex="0" aria-expanded="false" aria-controls="chemical-peels">Signature Chemical Peels</h3>
+    <div class="service-category" id="chemical-peels" aria-hidden="true"></div>
+</section>
+
+<section class="cart">
+    <h3>Your Cart</h3>
+    <ul id="cart-items" aria-live="polite"></ul>
+    <p>Total: $<span id="total">0</span></p>
+    <p id="cart-message" class="form-message" role="status" aria-live="polite"></p>
+    <button id="checkout-btn" type="button">Checkout</button>
+</section>
+
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>

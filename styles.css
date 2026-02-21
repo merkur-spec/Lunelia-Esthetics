@@ -1,0 +1,402 @@
+body {
+    margin: 0;
+    font-family: 'Montserrat', sans-serif;
+    background-color: #f9f6f4;
+    color: #333;
+    line-height: 1.6;
+}
+
+.skip-link {
+    position: absolute;
+    left: -999px;
+    top: 10px;
+    background: #8f6e4f;
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 4px;
+    z-index: 100;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    left: 10px;
+}
+
+header {
+    text-align: center;
+    padding: 100px 20px;
+    background: linear-gradient(to bottom, #f3ebe7, #f9f6f4);
+    border-bottom: 1px solid #e6ded8;
+}
+
+header h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 52px;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+}
+
+/* Services page title */
+header h2 {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 400;
+    font-size: 22px;
+    color: #555;
+    margin-top: 8px;
+}
+
+/* Navbar styles */
+.services-nav {
+    background: #f3ebe7;
+    padding: 10px 20px;
+    text-align: center;
+    z-index: 10;
+    border-bottom: 1px solid #ddd;
+}
+
+.services-nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.services-nav li {
+}
+
+.services-nav a {
+    text-decoration: none;
+    color: #8f6e4f;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.services-nav a:hover {
+    background: #b8956d;
+    color: white;
+}
+
+header p {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #777;
+}
+
+section {
+    max-width: 1000px;
+    margin: 30px auto;
+    padding: 40px 30px;
+}
+
+.booking-container {
+    max-width: 1000px;
+    margin: 30px auto;
+    padding: 0 30px 40px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+}
+
+.booking-container section {
+    margin: 0;
+    padding: 0;
+}
+
+
+section:nth-child(even) {
+    background-color: #ffffff;
+    border-radius: 10px;
+}
+
+.booking-container section:nth-child(even) {
+    background-color: transparent;
+    border-radius: 0;
+}
+/* All h3 Section Headers */
+section h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px;
+    letter-spacing: 1px;
+    margin-bottom: 25px;
+    position: relative;
+    padding-bottom: 10px;
+    text-align: center;
+}
+
+/* Elegant underline accent */
+section h3::after {
+    content: "";
+    display: block;
+    width: 60px;
+    height: 2px;
+    background: #c5a880;
+    margin: 12px auto 0 auto;
+}
+
+/* ===== SERVICE LIST ===== */
+.service-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #eee;
+    padding: 14px 0;
+    transition: 0.2s ease;
+}
+
+/* Centered Services Offered title */
+
+.service-item:hover {
+    background-color: #faf7f5;
+}
+
+.services {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.04);
+}
+
+button {
+    background: #c5a880;
+    border: none;
+    padding: 10px 16px;
+    color: white;
+    cursor: pointer;
+    border-radius: 30px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    transition: 0.25s ease;
+}
+
+button:hover {
+    background: #b8956d;
+    transform: translateY(-2px);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+    outline: 3px solid #8f6e4f;
+    outline-offset: 2px;
+}
+
+/* Collapsible sections */
+.service-category {
+    display: none;  /* Start collapsed */
+    padding: 10px 0;
+    margin-bottom: 20px;
+}
+
+.category-header {
+    cursor: pointer;
+    background: #f3ebe7;
+    padding: 12px 15px;
+    border-radius: 6px;
+    margin-top: 10px;
+    user-select: none;
+    transition: background 0.2s;
+
+    display: flex;               /* make flex container */
+    justify-content: center;     /* center text horizontally */
+    align-items: center;         /* center vertically */
+    position: relative;          /* needed for arrow positioning */
+}
+
+.category-header:hover {
+    background: #e0d3c9;
+}
+
+.category-header::after {
+    content: "▼";                /* default arrow */
+    position: absolute;          /* position relative to header */
+    right: 15px;                 /* same as padding-right */
+    font-size: 16px;
+}
+
+.category-header.active::after {
+    content: "▲";                /* switch arrow when active */
+}
+
+.category-header[role="button"] {
+    outline: none;
+}
+
+/* ===== CART ===== */
+.cart {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.05);
+}
+
+.cart p {
+    font-weight: 500;
+    font-size: 18px;
+}
+
+/* Cart headings */
+.cart h3 {
+    margin-bottom: 10px;
+}
+
+/* Cart list items */
+.cart ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 10px 0;
+}
+
+.cart li {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.form-message {
+    margin-top: 10px;
+    color: #7b4e2b;
+    font-weight: 500;
+    min-height: 20px;
+}
+
+.client-info,
+.cart-summary,
+.calendar-booking {
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.04);
+    padding: 30px;
+}
+
+.field-group {
+    margin-bottom: 16px;
+}
+
+.field-group input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+}
+
+/* ===== BOOKING SECTION ===== */
+.calendar-booking label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.calendar-booking input[type="date"] {
+    padding: 12px;
+    width: 180px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+    margin-bottom: 20px;
+}
+
+/* Time slots layout */
+.time-slots {
+    display: grid;
+    grid-template-columns: repeat(3, max-content); /* 3 columns */
+    row-gap: 6px;       /* vertical spacing between buttons */
+    column-gap: 3px;    /* reduce horizontal spacing to bring columns closer */
+    margin-bottom: 20px;
+}
+
+.time-slots button {
+    padding: 4px 10px;
+    font-size: 13px;
+    border-radius: 4px;
+    border: 1px solid #b8956d;
+    background: #c5a880;   /* default color */
+    color: white;
+    cursor: pointer;
+    text-align: center;
+    transition: 0.2s;
+    width: 100px;           /* keeps buttons uniform */
+}
+
+.time-slots button:hover:not(.disabled) {
+    background: #b8956d;   /* slightly darker on hover */
+}
+
+.time-slots button.selected {
+    background: #8f6e4f;   /* darker when selected */
+}
+
+.time-slots button.disabled {
+    background: #eee;
+    color: #aaa;
+    border-color: #ddd;
+    cursor: not-allowed;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+th,
+td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    font-weight: 600;
+    color: #6f4b2f;
+}
+
+/* Pay & Confirm Booking button */
+#pay-btn {
+    margin-top: 25px; /* push it slightly lower */
+    width: 230px;
+    padding: 14px;
+    font-size: 16px;
+    border-radius: 6px;
+}
+
+/* ===== FOOTER ===== */
+footer {
+    text-align: center;
+    padding: 40px 20px;
+    background: #f3ebe7;
+    font-size: 14px;
+    color: #555;
+}
+
+/* ===== SPECIALS ===== */
+.specials {
+    text-align: center;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+    padding: 40px 30px;
+    margin-bottom: 50px;
+}
+
+.specials p {
+    margin: 10px 0;
+    font-size: 16px;
+}
+
+@media (max-width: 900px) {
+    .booking-container {
+        grid-template-columns: 1fr;
+    }
+}

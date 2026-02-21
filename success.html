@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Confirmed - Lunelia Esthetics</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+    <h1>Lunelia Esthetics</h1>
+    <h2>Booking Confirmation</h2>
+</header>
+
+<main class="booking-container" id="main-content">
+    <section class="success-message">
+        <div id="loading">
+            <h3>Processing your booking...</h3>
+            <p>Please wait while we confirm your appointment.</p>
+        </div>
+        
+        <div id="success" style="display:none;">
+            <h3>✓ Your Appointment is Confirmed!</h3>
+            <p>Thank you for booking with Lunelia Esthetics.</p>
+            <p>A confirmation email has been sent to your email address with all the details of your appointment.</p>
+            
+            <div class="appointment-details">
+                <p><strong>Appointment Details:</strong></p>
+                <p>Name: <span id="appointment-name">-</span></p>
+                <p>Date: <span id="appointment-date">-</span></p>
+                <p>Time: <span id="appointment-time">-</span></p>
+                <p>Services: <span id="appointment-services">-</span></p>
+
+                <p><strong>Next Steps:</strong></p>
+                <ul>
+                    <li>Check your email for the confirmation</li>
+                    <li>You'll receive a reminder 24 hours before your appointment</li>
+                    <li>Arrive 5-10 minutes early</li>
+                </ul>
+            </div>
+
+            <a href="index.html" class="btn-home">Back to Home</a>
+        </div>
+        
+        <div id="error" style="display:none;">
+            <h3>✗ Something went wrong</h3>
+            <p id="error-message"></p>
+            <a href="index.html" class="btn-home">Back to Home</a>
+        </div>
+    </section>
+</main>
+
+<script>
+    window.addEventListener('load', async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session_id');
+        
+        const loadingDiv = document.getElementById('loading');
+        const successDiv = document.getElementById('success');
+        const errorDiv = document.getElementById('error');
+        const errorMessage = document.getElementById('error-message');
+        const appointmentName = document.getElementById('appointment-name');
+        const appointmentDate = document.getElementById('appointment-date');
+        const appointmentTime = document.getElementById('appointment-time');
+        const appointmentServices = document.getElementById('appointment-services');
+        
+        if (!sessionId) {
+            loadingDiv.style.display = 'none';
+            errorDiv.style.display = 'block';
+            errorMessage.textContent = 'No session found. Please try booking again.';
+            return;
+        }
+        
+        try {
+            // Confirm booking
+            const response = await fetch('/api/confirm-booking', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Booking confirmation failed');
+            }
+
+            if (data.appointment) {
+                appointmentName.textContent = data.appointment.name || 'Client';
+                appointmentDate.textContent = data.appointment.date || '-';
+                appointmentTime.textContent = data.appointment.time || '-';
+                appointmentServices.textContent = (data.appointment.services || [])
+                    .map(service => service.name)
+                    .join(', ') || '-';
+            }
+
+            // Clear localStorage
+            localStorage.removeItem('cart');
+            localStorage.removeItem('total');
+
+            // Show success
+            loadingDiv.style.display = 'none';
+            successDiv.style.display = 'block';
+        } catch (error) {
+            console.error('Error:', error);
+            loadingDiv.style.display = 'none';
+            errorDiv.style.display = 'block';
+            errorMessage.textContent = error.message;
+        }
+    });
+</script>
+
+<style>
+    .success-message {
+        text-align: center;
+        padding: 40px 30px;
+    }
+
+    .success-message h3 {
+        color: #8f6e4f;
+        font-size: 32px;
+        margin-bottom: 20px;
+    }
+
+    .success-message p {
+        font-size: 16px;
+        margin: 15px 0;
+    }
+
+    .appointment-details {
+        background: #f9f6f4;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 30px 0;
+        text-align: left;
+    }
+
+    .appointment-details ul {
+        margin: 15px 0;
+        padding-left: 20px;
+    }
+
+    .appointment-details li {
+        margin: 8px 0;
+    }
+
+    .btn-home {
+        display: inline-block;
+        background: #c5a880;
+        color: white;
+        padding: 12px 30px;
+        text-decoration: none;
+        border-radius: 30px;
+        font-weight: 500;
+        margin-top: 20px;
+        transition: 0.2s;
+    }
+
+    .btn-home:hover {
+        background: #b8956d;
+        transform: translateY(-2px);
+    }
+</style>
+
+</body>
+</html>

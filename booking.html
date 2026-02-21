@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Booking - Lunelia Esthetics</title>
+<link rel="stylesheet" href="styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+    <h1>Lunelia Esthetics</h1>
+    <h2>Schedule Your Appointment</h2>
+</header>
+
+<main class="booking-container" id="main-content">
+    <!-- Cart Summary -->
+    <section class="cart-summary">
+        <h3>Your Cart</h3>
+        <ul id="cart-items" aria-live="polite"></ul>
+        <p><strong>Total: $<span id="total">0</span></strong></p>
+    </section>
+
+    <section class="client-info">
+        <h3>Your Details</h3>
+        <form id="booking-form" novalidate>
+            <div class="field-group">
+                <label for="client-name">Full Name</label>
+                <input type="text" id="client-name" name="name" autocomplete="name" required>
+            </div>
+            <div class="field-group">
+                <label for="client-email">Email Address</label>
+                <input type="email" id="client-email" name="email" autocomplete="email" required>
+            </div>
+            <div class="field-group">
+                <label for="client-phone">Phone Number</label>
+                <input type="tel" id="client-phone" name="phone" autocomplete="tel" required>
+            </div>
+            <p id="form-message" class="form-message" role="status" aria-live="polite"></p>
+        </form>
+    </section>
+
+    <!-- Calendar & Time Slots -->
+    <section class="calendar-booking">
+        <h3>Select Date & Time</h3>
+
+        <label for="date">Pick a Date</label>
+        <input type="date" id="date">
+
+        <div class="time-wrapper">
+            <label>Available Time Slots:</label>
+            <div id="time-slots" class="time-slots">
+                <!-- Time buttons will appear here -->
+            </div>
+        </div>
+
+        <!-- Booking Details -->
+        <div id="booking-details" style="display:none; margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+            <h4>Booking Details</h4>
+            <p>Date: <strong id="booking-date">-</strong></p>
+            <p>Time: <strong id="booking-time">-</strong></p>
+        </div>
+
+        <button id="pay-btn" type="button" disabled>Pay & Confirm Booking</button>
+    </section>
+</main>
+
+<script src="https://js.stripe.com/v3/"></script>
+<script src="booking.js"></script>
+</body>
+</html>

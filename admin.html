@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Lunelia Esthetics</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+    <h1>Lunelia Esthetics</h1>
+    <h2>Admin Bookings</h2>
+</header>
+
+<main id="main-content" class="booking-container">
+    <section class="client-info">
+        <h3>Admin Login</h3>
+        <form id="admin-login" novalidate>
+            <div class="field-group">
+                <label for="admin-user">Username</label>
+                <input type="text" id="admin-user" autocomplete="username" required>
+            </div>
+            <div class="field-group">
+                <label for="admin-pass">Password</label>
+                <input type="password" id="admin-pass" autocomplete="current-password" required>
+            </div>
+            <p id="admin-message" class="form-message" role="status" aria-live="polite"></p>
+            <button type="submit">Sign In</button>
+        </form>
+    </section>
+
+    <section class="calendar-booking">
+        <h3>Appointments</h3>
+        <div class="table-wrapper">
+            <table id="appointments-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Time</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Services</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+<noscript>
+    <p style="text-align:center; padding: 20px;">JavaScript is required to view bookings.</p>
+</noscript>
+
+<script src="admin.js"></script>
+</body>
+</html>
