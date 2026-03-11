@@ -6,6 +6,7 @@ const payBtn = document.getElementById("pay-btn");
 const bookingDetailsDiv = document.getElementById("booking-details");
 const bookingDateSpan = document.getElementById("booking-date");
 const bookingTimeSpan = document.getElementById("booking-time");
+const bookingDurationSpan = document.getElementById("booking-duration");
 const bookingForm = document.getElementById("booking-form");
 const nameInput = document.getElementById("client-name");
 const emailInput = document.getElementById("client-email");
@@ -17,6 +18,68 @@ let selectedTime = null;
 let cart = [];
 let total = 0;
 let stripe = null;
+
+function toMinutes(timeText) {
+    const [hours, minutes] = String(timeText || "").split(":").map(Number);
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+        return null;
+    }
+    return hours * 60 + minutes;
+}
+
+function rangesOverlap(startA, durationA, startB, durationB) {
+    return startA < startB + durationB && startB < startA + durationA;
+}
+
+function getRequestedDuration() {
+    return cart.reduce((sum, service) => {
+        const duration = Number(service?.duration);
+        return sum + (Number.isInteger(duration) && duration > 0 ? duration : 30);
+    }, 0);
+}
+
+function highlightSelectedBlock(startTime) {
+    const requestedDuration = getRequestedDuration();
+    const startMinutes = toMinutes(startTime);
+
+    document.querySelectorAll(".time-slots button").forEach((button) => {
+        button.classList.remove("selected", "selected-range");
+        button.setAttribute("aria-pressed", "false");
+
+        const buttonMinutes = toMinutes(button.textContent.trim());
+        if (startMinutes === null || buttonMinutes === null) {
+            return;
+        }
+
+        const inSelectedBlock =
+            buttonMinutes >= startMinutes && buttonMinutes < startMinutes + requestedDuration;
+
+        if (!inSelectedBlock) {
+            return;
+        }
+
+        if (buttonMinutes === startMinutes) {
+            button.classList.add("selected");
+            button.setAttribute("aria-pressed", "true");
+        } else {
+            button.classList.add("selected-range");
+        }
+    });
+}
+
+function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15) {
+    const slots = [];
+
+    for (let hour = startHour; hour < endHour; hour += 1) {
+        for (let minute = 0; minute < 60; minute += intervalMinutes) {
+            const hh = String(hour).padStart(2, "0");
+            const mm = String(minute).padStart(2, "0");
+            slots.push(`${hh}:${mm}`);
+        }
+    }
+
+    return slots;
+}
 
 // Load Stripe with public key from server
 async function initStripe() {
@@ -65,13 +128,7 @@ function loadCart() {
     }
 }
 
-// Example: available times
-const times = [
-    "09:00","09:30","10:00","10:30",
-    "11:00","11:30","12:00","12:30",
-    "13:00","13:30","14:00","14:30",
-    "15:00","15:30","16:00","16:30"
-];
+const times = buildTimeSlots(9, 18, 15);
 
 // Generate time buttons
 function generateTimeSlots(date) {
@@ -88,22 +145,52 @@ function generateTimeSlots(date) {
             return data;
         })
         .then(appointments => {
-            times.forEach(time => {
+            const requestedDuration = getRequestedDuration();
+            const closeOfDay = toMinutes("18:00");
+            const columnsPerRow = 4;
+
+            let row = null;
+
+            times.forEach((time, index) => {
+                if (index % columnsPerRow === 0) {
+                    row = document.createElement("tr");
+                    timeSlotsContainer.appendChild(row);
+                }
+
                 const btn = document.createElement("button");
                 btn.textContent = time;
                 btn.setAttribute("type", "button");
                 btn.setAttribute("aria-pressed", "false");
 
-                // Disable if already booked
-                const conflict = appointments.some(apt => apt.date === date && apt.time === time);
-                if (conflict) {
+                const slotStart = toMinutes(time);
+                const exceedsBusinessHours =
+                    slotStart === null || closeOfDay === null
+                        ? true
+                        : slotStart + requestedDuration > closeOfDay;
+                const conflict = appointments.some((apt) => {
+                    if (apt.date !== date) return false;
+
+                    const bookedStart = toMinutes(apt.time);
+                    const bookedDuration = Number(apt.duration_minutes) || 30;
+
+                    if (slotStart === null || bookedStart === null) {
+                        return false;
+                    }
+
+                    return rangesOverlap(slotStart, requestedDuration, bookedStart, bookedDuration);
+                });
+
+                if (conflict || exceedsBusinessHours) {
                     btn.disabled = true;
                     btn.classList.add("disabled");
                     btn.setAttribute("aria-disabled", "true");
                 }
 
                 btn.addEventListener("click", () => selectTime(btn, time));
-                timeSlotsContainer.appendChild(btn);
+
+                const cell = document.createElement("td");
+                cell.appendChild(btn);
+                row.appendChild(cell);
             });
         })
         .catch(err => {
@@ -115,19 +202,14 @@ function generateTimeSlots(date) {
 }
 
 function selectTime(btn, time) {
-    // Remove previous selection
-    document.querySelectorAll(".time-slots button").forEach(b => {
-        b.classList.remove("selected");
-        b.setAttribute("aria-pressed", "false");
-    });
-    btn.classList.add("selected");
-    btn.setAttribute("aria-pressed", "true");
     selectedTime = time;
+    highlightSelectedBlock(time);
     
     // Show booking details
     bookingDetailsDiv.style.display = "block";
     bookingDateSpan.textContent = selectedDate;
     bookingTimeSpan.textContent = selectedTime;
+    bookingDurationSpan.textContent = String(getRequestedDuration());
 
     updatePayButtonState();
 }
@@ -140,6 +222,7 @@ dateInput.min = today;
 dateInput.addEventListener("change", () => {
     if (!dateInput.value) return;
     payBtn.disabled = true;
+    selectedTime = null;
     bookingDetailsDiv.style.display = "none";
     generateTimeSlots(dateInput.value);
 });

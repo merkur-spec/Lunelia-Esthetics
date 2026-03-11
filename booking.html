@@ -7,24 +7,63 @@
 <link rel="stylesheet" href="styles.css">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="booking-page">
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
+    <div class="header-actions" aria-label="Site navigation">
+        <a class="top-home-btn" href="index.html">Home</a>
+        <details class="top-menu">
+            <summary>Menu</summary>
+            <div class="top-menu-list">
+                <a href="about.html">About Us</a>
+                <a href="contact.html">Contact</a>
+                <a href="specials.html">Specials</a>
+            </div>
+        </details>
+    </div>
     <h1>Lunelia Esthetics</h1>
     <h2>Schedule Your Appointment</h2>
 </header>
 
 <main class="booking-container" id="main-content">
-    <!-- Cart Summary -->
-    <section class="cart-summary">
-        <h3>Your Cart</h3>
-        <ul id="cart-items" aria-live="polite"></ul>
-        <p><strong>Total: $<span id="total">0</span></strong></p>
+    <!-- Calendar & Time Slots -->
+    <section class="calendar-booking">
+        <h3>Your Cart & Booking</h3>
+        <p class="section-subtitle">Review your services, then choose a date and one available time slot.</p>
+
+        <div class="cart-inline">
+            <h4>Your Cart</h4>
+            <ul id="cart-items" aria-live="polite"></ul>
+            <p><strong>Total: $<span id="total">0</span></strong></p>
+        </div>
+
+        <label for="date">Pick a Date</label>
+        <input type="date" id="date">
+
+        <div class="time-wrapper">
+            <label>Available Time Slots:</label>
+            <table class="time-slots-table" aria-label="Available appointment times">
+                <tbody id="time-slots" class="time-slots">
+                    <!-- Time buttons will appear here -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Booking Details -->
+        <div id="booking-details" class="booking-details-card" style="display:none;">
+            <h4>Booking Details</h4>
+            <p>Date: <strong id="booking-date">-</strong></p>
+            <p>Time: <strong id="booking-time">-</strong></p>
+            <p>Your appointment will be approximately <strong id="booking-duration">-</strong> minutes.</p>
+        </div>
+
+        <button id="pay-btn" type="button" disabled>Pay & Confirm Booking</button>
     </section>
 
     <section class="client-info">
         <h3>Your Details</h3>
+        <p class="section-subtitle">Enter your contact info so we can confirm your appointment.</p>
         <form id="booking-form" novalidate>
             <div class="field-group">
                 <label for="client-name">Full Name</label>
@@ -40,30 +79,6 @@
             </div>
             <p id="form-message" class="form-message" role="status" aria-live="polite"></p>
         </form>
-    </section>
-
-    <!-- Calendar & Time Slots -->
-    <section class="calendar-booking">
-        <h3>Select Date & Time</h3>
-
-        <label for="date">Pick a Date</label>
-        <input type="date" id="date">
-
-        <div class="time-wrapper">
-            <label>Available Time Slots:</label>
-            <div id="time-slots" class="time-slots">
-                <!-- Time buttons will appear here -->
-            </div>
-        </div>
-
-        <!-- Booking Details -->
-        <div id="booking-details" style="display:none; margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
-            <h4>Booking Details</h4>
-            <p>Date: <strong id="booking-date">-</strong></p>
-            <p>Time: <strong id="booking-time">-</strong></p>
-        </div>
-
-        <button id="pay-btn" type="button" disabled>Pay & Confirm Booking</button>
     </section>
 </main>
 

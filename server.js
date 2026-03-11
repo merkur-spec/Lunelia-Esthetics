@@ -7,6 +7,7 @@ const rateLimit = require("express-rate-limit");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const nodemailer = require("nodemailer");
 const path = require("path");
+const { serviceData } = require("./serviceData");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,6 +15,32 @@ const WEBHOOK_PATH = "/api/webhook";
 const jsonParser = express.json({ limit: "1mb" });
 
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
+app.use((req, res, next) => {
+    if (process.env.NODE_ENV !== "production") {
+        return next();
+    }
+
+    const forwardedProto = (req.headers["x-forwarded-proto"] || "")
+        .toString()
+        .split(",")[0]
+        .trim();
+
+    if (req.secure || forwardedProto === "https") {
+        return next();
+    }
+
+    if (req.method === "GET" || req.method === "HEAD") {
+        if (!req.headers.host) {
+            return res.status(400).json({ error: "HTTPS is required" });
+        }
+
+        return res.redirect(301, `https://${req.headers.host}${req.originalUrl}`);
+    }
+
+    return res.status(400).json({ error: "HTTPS is required" });
+});
 
 const corsOrigins = (process.env.CORS_ORIGIN || "")
     .split(",")
@@ -60,6 +87,74 @@ pool.on('error', (err) => {
     console.error('Unexpected error on idle client', err);
 });
 
+async function migrateAppointmentDateTimeColumns() {
+    try {
+        const columnInfo = await pool.query(
+            `
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'appointments'
+                  AND column_name IN ('date', 'time')
+            `
+        );
+
+        const columnTypes = Object.fromEntries(
+            columnInfo.rows.map((row) => [row.column_name, row.data_type])
+        );
+
+        const needsDateMigration =
+            columnTypes.date === "text" || columnTypes.date === "character varying";
+        const needsTimeMigration =
+            columnTypes.time === "text" || columnTypes.time === "character varying";
+
+        if (!needsDateMigration && !needsTimeMigration) {
+            return;
+        }
+
+        const invalidData = await pool.query(
+            `
+                SELECT COUNT(*)::int AS count
+                FROM appointments
+                WHERE date::text !~ '^\\d{4}-\\d{2}-\\d{2}$'
+                   OR time::text !~ '^\\d{2}:\\d{2}(:\\d{2})?$'
+            `
+        );
+
+        if ((invalidData.rows[0]?.count || 0) > 0) {
+            console.warn(
+                "Skipping DATE/TIME migration for appointments because invalid existing values were found."
+            );
+            return;
+        }
+
+        await pool.query("BEGIN");
+
+        if (needsDateMigration) {
+            await pool.query(
+                "ALTER TABLE appointments ALTER COLUMN date TYPE DATE USING date::date"
+            );
+        }
+
+        if (needsTimeMigration) {
+            await pool.query(
+                "ALTER TABLE appointments ALTER COLUMN time TYPE TIME USING time::time"
+            );
+        }
+
+        await pool.query("COMMIT");
+        console.log("Migrated appointments.date/time columns to DATE/TIME");
+    } catch (migrationError) {
+        try {
+            await pool.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Rollback error during date/time migration:", rollbackError);
+        }
+
+        console.error("Date/time migration error:", migrationError);
+    }
+}
+
 // Create tables if they don't exist
 async function initializeDatabase() {
     try {
@@ -68,6 +163,7 @@ async function initializeDatabase() {
                 id SERIAL PRIMARY KEY,
                 date TEXT NOT NULL,
                 time TEXT NOT NULL,
+                duration_minutes INTEGER,
                 services TEXT NOT NULL,
                 email TEXT,
                 name TEXT,
@@ -98,6 +194,15 @@ async function initializeDatabase() {
             "CREATE UNIQUE INDEX IF NOT EXISTS appointments_payment_unique ON appointments (stripe_payment_id)"
         );
 
+        await pool.query(
+            "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS duration_minutes INTEGER"
+        );
+        await pool.query(
+            "UPDATE appointments SET duration_minutes = 30 WHERE duration_minutes IS NULL"
+        );
+
+        await migrateAppointmentDateTimeColumns();
+
         console.log("Connected to PostgreSQL and tables initialized");
     } catch (err) {
         console.error("Database initialization error:", err);
@@ -124,6 +229,49 @@ function isValidTime(value) {
     return /^\d{2}:\d{2}$/.test(value);
 }
 
+function normalizeServiceName(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+const canonicalServicesById = new Map();
+const canonicalServicesByName = new Map();
+
+for (const category of Object.values(serviceData || {})) {
+    if (!category || !Array.isArray(category.services)) {
+        continue;
+    }
+
+    for (const service of category.services) {
+        if (!service || typeof service.id !== "string" || typeof service.name !== "string") {
+            continue;
+        }
+
+        const id = service.id.trim();
+        const name = service.name.trim();
+        const price = Math.round(Number(service.price));
+        const duration = Math.round(Number(service.duration));
+
+        if (!id || !name || !Number.isFinite(price) || price <= 0) {
+            continue;
+        }
+
+        if (!Number.isFinite(duration) || duration <= 0) {
+            continue;
+        }
+
+        const canonical = { id, name, price, duration };
+        canonicalServicesById.set(id, canonical);
+        canonicalServicesByName.set(normalizeServiceName(name), canonical);
+    }
+}
+
+function getServicesTotalDuration(services) {
+    return services.reduce((sum, service) => sum + service.duration, 0);
+}
+
 function sanitizeServices(services) {
     if (!Array.isArray(services) || services.length === 0) {
         return null;
@@ -131,21 +279,33 @@ function sanitizeServices(services) {
 
     const sanitized = services
         .map((service) => {
-            if (!service || typeof service.name !== "string") {
+            if (!service || typeof service !== "object") {
                 return null;
             }
 
-            const price = Number(service.price);
-            if (!Number.isFinite(price) || price <= 0) {
+            const serviceId = typeof service.id === "string" ? service.id.trim() : "";
+            const serviceName = typeof service.name === "string" ? service.name : "";
+
+            let canonical = null;
+
+            if (serviceId) {
+                canonical = canonicalServicesById.get(serviceId) || null;
+            }
+
+            if (!canonical && serviceName) {
+                canonical = canonicalServicesByName.get(normalizeServiceName(serviceName)) || null;
+            }
+
+            if (!canonical) {
                 return null;
             }
 
-            const name = service.name.trim();
-            if (!name) {
-                return null;
-            }
-
-            return { name, price: Math.round(price) };
+            return {
+                id: canonical.id,
+                name: canonical.name,
+                price: canonical.price,
+                duration: canonical.duration
+            };
         })
         .filter(Boolean);
 
@@ -196,7 +356,7 @@ app.get("/api/appointments", async (req, res) => {
         const { date } = req.query;
         const params = [];
         let query =
-            "SELECT date, time FROM appointments WHERE stripe_payment_id IS NOT NULL AND status = 'confirmed'";
+            "SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes FROM appointments WHERE stripe_payment_id IS NOT NULL AND status = 'confirmed'";
 
         if (date) {
             if (!isValidDate(date)) {
@@ -226,7 +386,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
         const customerPhone = customer?.phone?.trim() || "";
         const timezone = customer?.timezone?.trim() || "";
 
-        if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        if (!Number.isInteger(parsedAmount) || parsedAmount <= 0) {
             return res.status(400).json({ error: "Invalid amount" });
         }
 
@@ -236,13 +396,27 @@ app.post("/api/create-payment-intent", async (req, res) => {
 
         const expectedAmount =
             sanitizedServices.reduce((sum, service) => sum + service.price, 0) * 100;
+        const requestedDuration = getServicesTotalDuration(sanitizedServices);
+
+        if (!Number.isInteger(requestedDuration) || requestedDuration <= 0) {
+            return res.status(400).json({ error: "Invalid service duration" });
+        }
+
         if (parsedAmount !== expectedAmount) {
             return res.status(400).json({ error: "Amount does not match services" });
         }
 
         const conflict = await pool.query(
-            "SELECT id FROM appointments WHERE date = $1 AND time = $2 AND status = 'confirmed' LIMIT 1",
-            [date, time]
+            `
+                SELECT id
+                FROM appointments
+                WHERE date = $1
+                  AND status = 'confirmed'
+                  AND time < ($2::time + make_interval(mins => $3::int))
+                  AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                LIMIT 1
+            `,
+            [date, time, requestedDuration]
         );
         if (conflict.rows.length > 0) {
             return res.status(409).json({ error: "Time slot already booked" });
@@ -270,6 +444,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
             metadata: {
                 date,
                 time,
+                durationMinutes: String(requestedDuration),
                 services: JSON.stringify(sanitizedServices),
                 name: customerName,
                 email: customerEmail,
@@ -312,7 +487,16 @@ app.post("/api/confirm-booking", async (req, res) => {
             return res.status(400).json({ error: "Payment not completed" });
         }
 
-        const { date, time, services, name: metaName, email: metaEmail, phone: metaPhone, timezone } =
+        const {
+            date,
+            time,
+            services,
+            durationMinutes,
+            name: metaName,
+            email: metaEmail,
+            phone: metaPhone,
+            timezone
+        } =
             session.metadata || {};
 
         if (!isValidDate(date) || !isValidTime(time) || !services) {
@@ -330,9 +514,19 @@ app.post("/api/confirm-booking", async (req, res) => {
                 return [];
             }
         })();
+        const calculatedDuration = getServicesTotalDuration(sanitizeServices(servicesList) || []);
+        const parsedDuration = Number(durationMinutes);
+        const appointmentDuration =
+            Number.isInteger(parsedDuration) && parsedDuration > 0
+                ? parsedDuration
+                : calculatedDuration;
+
+        if (!Number.isInteger(appointmentDuration) || appointmentDuration <= 0) {
+            return res.status(400).json({ error: "Invalid booking duration" });
+        }
 
         const existing = await pool.query(
-            "SELECT id, date, time, services, email, name, phone, price, timezone FROM appointments WHERE stripe_payment_id = $1 LIMIT 1",
+            "SELECT id, TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes, services, email, name, phone, price, timezone FROM appointments WHERE stripe_payment_id = $1 LIMIT 1",
             [session.payment_intent]
         );
         if (existing.rows.length > 0) {
@@ -359,14 +553,31 @@ app.post("/api/confirm-booking", async (req, res) => {
                 }
             });
         }
+        const overlap = await pool.query(
+            `
+                SELECT id
+                FROM appointments
+                WHERE date = $1
+                  AND status = 'confirmed'
+                  AND time < ($2::time + make_interval(mins => $3::int))
+                  AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                LIMIT 1
+            `,
+            [date, time, appointmentDuration]
+        );
+
+        if (overlap.rows.length > 0) {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
 
         // Insert appointment
         try {
             const result = await pool.query(
-                "INSERT INTO appointments (date, time, services, email, name, phone, price, stripe_payment_id, timezone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+                "INSERT INTO appointments (date, time, duration_minutes, services, email, name, phone, price, stripe_payment_id, timezone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
                 [
                     date,
                     time,
+                    appointmentDuration,
                     services,
                     appointmentEmail,
                     appointmentName,
@@ -470,7 +681,7 @@ app.post(WEBHOOK_PATH, express.raw({ type: "application/json" }), async (req, re
 app.get("/api/admin/appointments", requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT id, date, time, services, email, name, phone, price, timezone, status, created_at FROM appointments ORDER BY created_at DESC"
+            "SELECT id, TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, services, email, name, phone, price, timezone, status, created_at FROM appointments ORDER BY created_at DESC"
         );
         res.json(result.rows || []);
     } catch (err) {

@@ -1,6 +1,6 @@
 // Service data with durations (in minutes) and prices
 // Duration = service time + buffer, already included
-export const serviceData = {
+const serviceData = {
     "facial-waxing": {
         name: "Facial Waxing",
         badge: null,
@@ -90,7 +90,7 @@ export const serviceData = {
 };
 
 // Combo stacking rules
-export const comboStackingRules = {
+const comboStackingRules = {
     sameArea: { addMinutes: 3 },        // Same position, no repositioning
     adjacent: { addMinutes: 5 },       // Minor transition/repositioning
     separate: "fullBlock",             // Separate setup — use full block time
@@ -98,40 +98,37 @@ export const comboStackingRules = {
     faceCombo: { addMinutes: 3 }       // Additional facial areas
 };
 
+function toDurationBucket(duration) {
+    const minutes = Number(duration);
+
+    if (!Number.isFinite(minutes) || minutes <= 15) return 15;
+    if (minutes <= 30) return 30;
+    if (minutes <= 45) return 45;
+    if (minutes <= 60) return 60;
+    return 75;
+}
+
+for (const category of Object.values(serviceData)) {
+    if (!category || !Array.isArray(category.services)) {
+        continue;
+    }
+
+    for (const service of category.services) {
+        service.duration = toDurationBucket(service.duration);
+    }
+}
+
 // Helper: calculate total time for a combo
-export function calculateComboTime(serviceIds) {
+function calculateComboTime(serviceIds) {
     if (!serviceIds || serviceIds.length === 0) return 0;
-    if (serviceIds.length === 1) {
-        const service = findServiceById(serviceIds[0]);
-        return service ? service.duration : 0;
-    }
-
-    // First service uses full duration
-    const firstService = findServiceById(serviceIds[0]);
-    if (!firstService) return 0;
-
-    let totalTime = firstService.duration;
-
-    // Add subsequent services based on stacking rules
-    for (let i = 1; i < serviceIds.length; i++) {
-        const service = findServiceById(serviceIds[i]);
-        if (!service) continue;
-
-        // For now, use a simple rule: add-ons add 0, others add 5
-        if (service.duration === 0) {
-            totalTime += 0;
-        } else if (service.id.includes("lash")) {
-            totalTime += service.duration;
-        } else {
-            totalTime += 5; // Default adjacent/adjacent logic
-        }
-    }
-
-    return totalTime;
+    return serviceIds.reduce((sum, serviceId) => {
+        const service = findServiceById(serviceId);
+        return sum + (service ? service.duration : 0);
+    }, 0);
 }
 
 // Helper: find a service by ID
-export function findServiceById(serviceId) {
+function findServiceById(serviceId) {
     for (const category of Object.values(serviceData)) {
         const found = category.services.find(s => s.id === serviceId);
         if (found) return found;
@@ -140,10 +137,26 @@ export function findServiceById(serviceId) {
 }
 
 // Helper: get all services as flat array
-export function getAllServices() {
+function getAllServices() {
     const all = [];
     for (const category of Object.values(serviceData)) {
         all.push(...category.services);
     }
     return all;
+}
+
+const exportedCatalog = {
+    serviceData,
+    comboStackingRules,
+    calculateComboTime,
+    findServiceById,
+    getAllServices
+};
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = exportedCatalog;
+}
+
+if (typeof window !== "undefined") {
+    window.luneliaServiceCatalog = exportedCatalog;
 }
