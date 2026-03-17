@@ -11,13 +11,77 @@ const bookingForm = document.getElementById("booking-form");
 const nameInput = document.getElementById("client-name");
 const emailInput = document.getElementById("client-email");
 const phoneInput = document.getElementById("client-phone");
+const referralEmailInput = document.getElementById("referral-email");
 const formMessage = document.getElementById("form-message");
+const PENDING_BOOKING_KEY = "pendingBookingDraft";
 
 let selectedDate = null;
 let selectedTime = null;
 let cart = [];
 let total = 0;
-let stripe = null;
+
+function persistCartState() {
+    localStorage.setItem("cart", JSON.stringify(cart));
+    localStorage.setItem("total", String(total));
+}
+
+function renderCheckoutCart() {
+    cartItemsContainer.innerHTML = "";
+
+    cart.forEach((item, index) => {
+        const li = document.createElement("li");
+
+        const itemText = document.createElement("span");
+        itemText.textContent = `${item.name} - $${item.price}`;
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "cart-remove-btn";
+        removeButton.textContent = "Remove";
+        removeButton.setAttribute("aria-label", `Remove ${item.name} from cart`);
+        removeButton.addEventListener("click", () => removeFromCheckoutCart(index));
+
+        li.appendChild(itemText);
+        li.appendChild(removeButton);
+        cartItemsContainer.appendChild(li);
+    });
+
+    totalSpan.textContent = String(total);
+}
+
+function removeFromCheckoutCart(index) {
+    const [removedItem] = cart.splice(index, 1);
+    if (!removedItem) {
+        return;
+    }
+
+    total = Math.max(0, total - Number(removedItem.price || 0));
+    renderCheckoutCart();
+    persistCartState();
+
+    if (formMessage) {
+        formMessage.textContent = "Removed from cart.";
+    }
+
+    if (cart.length === 0) {
+        selectedTime = null;
+        bookingDetailsDiv.style.display = "none";
+        timeSlotsContainer.innerHTML = "";
+        payBtn.disabled = true;
+        if (formMessage) {
+            formMessage.textContent = "Your cart is empty. Please return to Home to add services.";
+        }
+        return;
+    }
+
+    if (selectedDate) {
+        selectedTime = null;
+        bookingDetailsDiv.style.display = "none";
+        generateTimeSlots(selectedDate);
+    }
+
+    updatePayButtonState();
+}
 
 function toMinutes(timeText) {
     const [hours, minutes] = String(timeText || "").split(":").map(Number);
@@ -81,27 +145,9 @@ function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15) {
     return slots;
 }
 
-// Load Stripe with public key from server
-async function initStripe() {
-    try {
-        const response = await fetch("/api/stripe-public-key");
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || "Stripe configuration error");
-        }
-        const { publicKey } = data;
-        stripe = Stripe(publicKey);
-    } catch (error) {
-        console.error("Failed to load Stripe:", error);
-        payBtn.disabled = true;
-        if (formMessage) {
-            formMessage.textContent = "Payment system unavailable. Please try again later.";
-        }
-    }
-}
-
 // Load cart from localStorage
 function loadCart() {
+    localStorage.removeItem(PENDING_BOOKING_KEY);
     const savedCart = localStorage.getItem("cart");
     const savedTotal = localStorage.getItem("total");
     
@@ -109,22 +155,16 @@ function loadCart() {
         cart = JSON.parse(savedCart);
         total = parseInt(savedTotal) || 0;
     }
-    
-    // Display cart items
-    cartItemsContainer.innerHTML = "";
-    cart.forEach(item => {
-        const li = document.createElement("li");
-        li.textContent = `${item.name} - $${item.price}`;
-        cartItemsContainer.appendChild(li);
-    });
-    
-    totalSpan.textContent = total;
+
+    renderCheckoutCart();
     
     if (cart.length === 0) {
         if (formMessage) {
-            formMessage.textContent = "No services selected. Please go back to select services.";
+            formMessage.textContent = "Your cart is empty. Please return to Home to add services.";
         }
-        window.location.href = "index.html";
+        payBtn.disabled = true;
+        timeSlotsContainer.innerHTML = "";
+        bookingDetailsDiv.style.display = "none";
     }
 }
 
@@ -233,7 +273,7 @@ function updatePayButtonState() {
         emailInput.value.trim().length > 0 &&
         phoneInput.value.trim().length > 0;
 
-    payBtn.disabled = !(isFormValid && selectedDate && selectedTime && stripe);
+    payBtn.disabled = !(cart.length > 0 && isFormValid && selectedDate && selectedTime);
 }
 
 bookingForm.addEventListener("input", () => {
@@ -245,6 +285,13 @@ bookingForm.addEventListener("input", () => {
 
 // Payment button
 payBtn.addEventListener("click", async () => {
+    if (cart.length === 0) {
+        if (formMessage) {
+            formMessage.textContent = "Your cart is empty. Please return to Home to add services.";
+        }
+        return;
+    }
+
     if (!selectedDate || !selectedTime) {
         if (formMessage) {
             formMessage.textContent = "Please select a date and time first.";
@@ -258,18 +305,24 @@ payBtn.addEventListener("click", async () => {
         }
         return;
     }
+
+    const referralEmail = referralEmailInput?.value?.trim() || "";
+    if (referralEmail && !/^\S+@\S+\.\S+$/.test(referralEmail)) {
+        if (formMessage) {
+            formMessage.textContent = "Please enter a valid referral email or leave it blank.";
+        }
+        return;
+    }
     
     payBtn.disabled = true;
-    payBtn.textContent = "Processing...";
+    payBtn.textContent = "Continuing...";
     payBtn.setAttribute("aria-busy", "true");
     
     try {
-        // Create payment intent
-        const response = await fetch("/api/create-payment-intent", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                amount: total * 100, // Convert to cents
+        localStorage.setItem(
+            PENDING_BOOKING_KEY,
+            JSON.stringify({
+                amount: total * 100,
                 date: selectedDate,
                 time: selectedTime,
                 services: cart,
@@ -277,30 +330,13 @@ payBtn.addEventListener("click", async () => {
                     name: nameInput.value.trim(),
                     email: emailInput.value.trim(),
                     phone: phoneInput.value.trim(),
-                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    referralEmail
                 }
             })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || "Payment failed");
-        }
-        
-        // Redirect to Stripe Checkout
-        const result = await stripe.redirectToCheckout({
-            sessionId: data.sessionId
-        });
-        
-        if (result.error) {
-            if (formMessage) {
-                formMessage.textContent = `Payment error: ${result.error.message}`;
-            }
-            payBtn.disabled = false;
-            payBtn.textContent = "Pay & Confirm Booking";
-            payBtn.removeAttribute("aria-busy");
-        }
+        );
+
+        window.location.href = "consent.html";
     } catch (error) {
         console.error("Error:", error);
         if (formMessage) {
@@ -314,5 +350,4 @@ payBtn.addEventListener("click", async () => {
 
 // Initialize
 loadCart();
-initStripe();
 updatePayButtonState();

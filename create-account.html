@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Account - Lunelia Esthetics</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+    <div class="header-actions" aria-label="Site navigation">
+        <a class="top-home-btn" href="index.html">Home</a>
+        <details class="top-menu">
+            <summary>Menu</summary>
+            <div class="top-menu-list">
+                <a href="about.html">About Us</a>
+                <a href="contact.html">Contact</a>
+                <a href="specials.html">Specials</a>
+                <a href="client.html">Sign In</a>
+            </div>
+        </details>
+    </div>
+    <h1>Lunelia Esthetics</h1>
+    <h2>Create Account</h2>
+</header>
+
+<main id="main-content" class="booking-container admin-layout">
+    <section class="client-info admin-login-section">
+        <h3>Create Your Client Account</h3>
+        <form id="create-account-form" novalidate>
+            <div class="field-group">
+                <label for="create-name">Full Name</label>
+                <input type="text" id="create-name" required>
+            </div>
+            <div class="field-group">
+                <label for="create-email">Email</label>
+                <input type="email" id="create-email" required>
+            </div>
+            <div class="field-group">
+                <label for="create-password">Password (8+ characters)</label>
+                <input type="password" id="create-password" minlength="8" required>
+            </div>
+            <div class="field-group">
+                <label for="create-password-confirm">Re-enter Password</label>
+                <input type="password" id="create-password-confirm" minlength="8" required>
+            </div>
+            <button type="submit">Create Account</button>
+        </form>
+
+        <p id="create-account-message" class="form-message" role="status" aria-live="polite"></p>
+    </section>
+</main>
+
+<script src="create-account.js"></script>
+<script src="auth-menu.js"></script>
+</body>
+</html>

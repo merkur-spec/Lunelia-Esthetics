@@ -18,6 +18,8 @@ const uiServiceData = Object.fromEntries(
 let cart = [];
 let total = 0;
 const cartMessage = document.getElementById("cart-message");
+const cartItemsList = document.getElementById("cart-items");
+const totalElement = document.getElementById("total");
 
 // Render Services
 Object.keys(uiServiceData).forEach(categoryId => {
@@ -33,10 +35,10 @@ Object.keys(uiServiceData).forEach(categoryId => {
         const isCallToBook = categoryId === "chemical-peels";
 
         if (isCallToBook) {
-            addButton.textContent = "Call us to book this service!";
+            addButton.textContent = "Email us to book this service!";
             addButton.disabled = true;
             addButton.classList.add("call-to-book-btn");
-            addButton.setAttribute("aria-label", `Call to book ${service.name}`);
+            addButton.setAttribute("aria-label", `Email us to book ${service.name}`);
         } else {
             addButton.setAttribute("aria-label", `Add ${service.name} to cart`);
             addButton.addEventListener("click", () => addToCart(service));
@@ -101,19 +103,106 @@ document.querySelectorAll(".services-nav a").forEach(link => {
     });
 });
 
+const bookNowLink = document.querySelector(".hero-book-link");
+if (bookNowLink) {
+    bookNowLink.addEventListener("click", (event) => {
+        event.preventDefault();
+
+        document.querySelectorAll(".category-header").forEach((header) => {
+            toggleCategory(header, true);
+        });
+
+        const servicesSection = document.querySelector(".services");
+        if (servicesSection) {
+            const navbar = document.querySelector(".services-nav");
+            const offset = navbar ? navbar.offsetHeight : 0;
+            const targetTop = servicesSection.getBoundingClientRect().top + window.scrollY - offset;
+
+            window.scrollTo({
+                top: targetTop,
+                behavior: "smooth"
+            });
+        }
+    });
+}
+
+function renderHomeCart() {
+    cartItemsList.innerHTML = "";
+
+    cart.forEach((item, index) => {
+        const li = document.createElement("li");
+
+        const itemText = document.createElement("span");
+        itemText.textContent = `${item.name} - $${item.price}`;
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "cart-remove-btn";
+        removeButton.textContent = "Remove";
+        removeButton.setAttribute("aria-label", `Remove ${item.name} from cart`);
+        removeButton.addEventListener("click", () => removeFromHomeCart(index));
+
+        li.appendChild(itemText);
+        li.appendChild(removeButton);
+        cartItemsList.appendChild(li);
+    });
+
+    totalElement.textContent = String(total);
+}
+
+function removeFromHomeCart(index) {
+    const [removedItem] = cart.splice(index, 1);
+    if (!removedItem) {
+        return;
+    }
+
+    total = Math.max(0, total - Number(removedItem.price || 0));
+    renderHomeCart();
+
+    if (cartMessage) {
+        cartMessage.textContent = "Removed from cart.";
+    }
+}
+
 // Add to Cart
 function addToCart(service) {
+    const serviceId = String(service?.id || "").trim();
+    const duplicate = cart.some((item) => {
+        const itemId = String(item?.id || "").trim();
+        if (serviceId && itemId) {
+            return itemId === serviceId;
+        }
+
+        return String(item?.name || "").trim().toLowerCase() ===
+            String(service?.name || "").trim().toLowerCase();
+    });
+
+    if (duplicate) {
+        if (cartMessage) {
+            cartMessage.textContent = "This treatment is already in your cart.";
+        }
+        return;
+    }
+
     cart.push(service);
     total += service.price;
-    document.getElementById("total").textContent = total;
+    renderHomeCart();
 
     if (cartMessage) {
         cartMessage.textContent = "Added to cart.";
     }
 
-    const li = document.createElement("li");
-    li.textContent = `${service.name} - $${service.price}`;
-    document.getElementById("cart-items").appendChild(li);
+    const cartSection = document.getElementById("home-cart");
+    if (cartSection) {
+        const navbar = document.querySelector(".services-nav");
+        const offset = navbar ? navbar.offsetHeight : 0;
+        const targetTop = cartSection.getBoundingClientRect().top + window.scrollY - offset;
+
+        window.scrollTo({
+            top: targetTop,
+            behavior: "smooth"
+        });
+    }
 }
 
 // Checkout — go to booking page

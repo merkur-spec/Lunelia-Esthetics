@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="admin-page">
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
@@ -19,6 +19,7 @@
                 <a href="about.html">About Us</a>
                 <a href="contact.html">Contact</a>
                 <a href="specials.html">Specials</a>
+                <a href="client.html">Sign In</a>
             </div>
         </details>
     </div>
@@ -26,8 +27,8 @@
     <h2>Admin Bookings</h2>
 </header>
 
-<main id="main-content" class="booking-container">
-    <section class="client-info">
+<main id="main-content" class="booking-container admin-layout">
+    <section class="client-info admin-login-section" id="admin-login-section">
         <h3>Admin Login</h3>
         <form id="admin-login" novalidate>
             <div class="field-group">
@@ -43,26 +44,174 @@
         </form>
     </section>
 
-    <section class="calendar-booking">
-        <h3>Appointments</h3>
-        <div class="table-wrapper">
-            <table id="appointments-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Time</th>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Phone</th>
-                        <th>Services</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </section>
+    <div id="admin-dashboard" class="admin-dashboard" hidden>
+        <section class="calendar-booking">
+            <h3>Appointments</h3>
+            <p id="dashboard-message" class="form-message admin-dashboard-message" role="status" aria-live="polite"></p>
+            <div class="table-wrapper admin-table-wrapper">
+                <table id="appointments-table" class="admin-table">
+                    <caption>Booked appointments</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Time</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Phone</th>
+                            <th scope="col">Services</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="calendar-booking admin-reports" id="admin-reports" hidden>
+            <h3>Reports & Analytics</h3>
+            <form id="analytics-filter" class="analytics-filter" novalidate>
+                <div class="field-group">
+                    <label for="analytics-start">Start Date</label>
+                    <input type="date" id="analytics-start" required>
+                </div>
+                <div class="field-group">
+                    <label for="analytics-end">End Date</label>
+                    <input type="date" id="analytics-end" required>
+                </div>
+                <button type="submit" id="analytics-refresh">Refresh</button>
+            </form>
+
+            <div class="analytics-cards" id="analytics-cards">
+                <article class="analytics-card">
+                    <h4>Total Appointments</h4>
+                    <p id="metric-appointments">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Confirmed</h4>
+                    <p id="metric-confirmed">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Cancelled</h4>
+                    <p id="metric-cancelled">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Revenue</h4>
+                    <p id="metric-revenue">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Avg Ticket</h4>
+                    <p id="metric-avg-ticket">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Completion Rate</h4>
+                    <p id="metric-completion-rate">-</p>
+                </article>
+            </div>
+
+            <div class="analytics-panels">
+                <div class="analytics-panel">
+                    <h4>Daily Performance</h4>
+                    <div class="table-wrapper admin-table-wrapper">
+                        <table id="analytics-daily-table" class="admin-table">
+                            <caption>Daily booking and revenue totals</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Date</th>
+                                    <th scope="col">Appointments</th>
+                                    <th scope="col">Confirmed</th>
+                                    <th scope="col">Cancelled</th>
+                                    <th scope="col">Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="toggle-daily-performance" class="analytics-toggle" hidden>
+                        Show all days
+                    </button>
+                </div>
+
+                <div class="analytics-panel">
+                    <h4>Top Services</h4>
+                    <div class="table-wrapper admin-table-wrapper">
+                        <table id="analytics-services-table" class="admin-table">
+                            <caption>Most booked services in selected range</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Service</th>
+                                    <th scope="col">Bookings</th>
+                                    <th scope="col">Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="calendar-booking admin-finance" id="admin-finance" hidden>
+            <h3>Revenue & Expenses</h3>
+            <div class="analytics-cards" id="finance-cards">
+                <article class="analytics-card">
+                    <h4>Confirmed Revenue</h4>
+                    <p id="metric-confirmed-revenue">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Cancellation Fees</h4>
+                    <p id="metric-cancel-fees">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>No-Show Fees</h4>
+                    <p id="metric-no-show-fees">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Total Expenses</h4>
+                    <p id="metric-expenses">-</p>
+                </article>
+                <article class="analytics-card">
+                    <h4>Net Revenue</h4>
+                    <p id="metric-net-revenue">-</p>
+                </article>
+            </div>
+
+            <form id="expense-form" class="analytics-filter" novalidate>
+                <div class="field-group">
+                    <label for="expense-date">Date</label>
+                    <input type="date" id="expense-date" required>
+                </div>
+                <div class="field-group">
+                    <label for="expense-category">Category</label>
+                    <input type="text" id="expense-category" placeholder="Supplies" required>
+                </div>
+                <div class="field-group">
+                    <label for="expense-amount">Amount (USD)</label>
+                    <input type="number" step="0.01" min="0" id="expense-amount" required>
+                </div>
+                <div class="field-group">
+                    <label for="expense-description">Description</label>
+                    <input type="text" id="expense-description" placeholder="Optional note">
+                </div>
+                <button type="submit">Add Expense</button>
+            </form>
+
+            <div class="table-wrapper admin-table-wrapper">
+                <table id="expenses-table" class="admin-table">
+                    <caption>Recorded expenses for selected range</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
 </main>
 
 <noscript>
@@ -70,5 +219,6 @@
 </noscript>
 
 <script src="admin.js"></script>
+<script src="auth-menu.js"></script>
 </body>
 </html>

@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="success-page">
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
@@ -19,6 +19,7 @@
                 <a href="about.html">About Us</a>
                 <a href="contact.html">Contact</a>
                 <a href="specials.html">Specials</a>
+                <a href="client.html">Sign In</a>
             </div>
         </details>
     </div>
@@ -111,6 +112,7 @@
             // Clear localStorage
             localStorage.removeItem('cart');
             localStorage.removeItem('total');
+            localStorage.removeItem('pendingBookingDraft');
 
             // Show success
             loadingDiv.style.display = 'none';
@@ -123,6 +125,8 @@
         }
     });
 </script>
+
+<script src="auth-menu.js"></script>
 
 </body>
 </html>

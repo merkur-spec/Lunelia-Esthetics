@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consent Form - Lunelia Esthetics</title>
+<link rel="stylesheet" href="styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body class="booking-page consent-page">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+    <div class="header-actions" aria-label="Site navigation">
+        <a class="top-home-btn" href="index.html">Home</a>
+        <details class="top-menu">
+            <summary>Menu</summary>
+            <div class="top-menu-list">
+                <a href="about.html">About Us</a>
+                <a href="contact.html">Contact</a>
+                <a href="specials.html">Specials</a>
+                <a href="client.html">Sign In</a>
+            </div>
+        </details>
+    </div>
+    <h1>Lunelia Esthetics</h1>
+    <h2>Consent Form</h2>
+</header>
+
+<main class="booking-container admin-layout" id="main-content">
+    <section class="client-info admin-login-section">
+        <h3>Consent & Policy Agreement</h3>
+        <p class="section-subtitle">Complete this step to continue to payment.</p>
+
+        <div class="booking-policy-note" aria-label="Booking policy">
+            <p><strong>Booking Policy:</strong></p>
+            <ul>
+                <li>If you are more than 10 minutes late, your appointment may be forfeited and rescheduled.</li>
+                <li>No-shows are charged 50% of the booked service total.</li>
+                <li>Last-minute cancellations (within 24 hours) are charged 30% of the booked service total.</li>
+            </ul>
+        </div>
+
+        <form id="consent-form" novalidate>
+            <div class="field-group consent-field">
+                <label for="consent-signature">Consent Form Signature (type full legal name)</label>
+                <input type="text" id="consent-signature" name="consent-signature" autocomplete="name" required>
+            </div>
+            <div class="field-group consent-check">
+                <label>
+                    <input type="checkbox" id="consent-accepted" required>
+                    I confirm I have read and agree to the service consent and booking policies.
+                </label>
+            </div>
+
+            <p id="consent-message" class="form-message" role="status" aria-live="polite"></p>
+            <button type="submit" id="consent-submit">Continue to Payment</button>
+        </form>
+    </section>
+</main>
+
+<script src="https://js.stripe.com/v3/"></script>
+<script src="consent.js"></script>
+<script src="auth-menu.js"></script>
+</body>
+</html>
