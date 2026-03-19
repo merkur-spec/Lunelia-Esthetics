@@ -14,8 +14,37 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_PATH = "/api/webhook";
 const jsonParser = express.json({ limit: "1mb" });
-const CLIENT_TOKEN_SECRET = process.env.CLIENT_TOKEN_SECRET || "change-this-client-token-secret";
+const CLIENT_TOKEN_SECRET = String(process.env.CLIENT_TOKEN_SECRET || "").trim();
 const PUBLIC_APP_URL = process.env.FRONTEND_URL || process.env.DOMAIN || "http://localhost:5500";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const CLIENT_SESSION_COOKIE = "clientSession";
+const CLIENT_CSRF_COOKIE = "clientCsrf";
+const CLIENT_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+const ADMIN_RATE_LIMIT_WINDOW_MS = parsePositiveIntEnv(
+    "ADMIN_RATE_LIMIT_WINDOW_MS",
+    15 * 60 * 1000
+);
+const ADMIN_RATE_LIMIT_MAX = parsePositiveIntEnv("ADMIN_RATE_LIMIT_MAX", 100);
+
+if (!CLIENT_TOKEN_SECRET || CLIENT_TOKEN_SECRET.length < 32) {
+    throw new Error("CLIENT_TOKEN_SECRET must be set and at least 32 characters long");
+}
+
+function sendInternalError(res, logLabel, error) {
+    console.error(logLabel, error);
+    return res.status(500).json({ error: "Internal server error" });
+}
+
+function parsePositiveIntEnv(name, fallback) {
+    const raw = String(process.env[name] || "").trim();
+
+    if (!raw) {
+        return fallback;
+    }
+
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -50,19 +79,74 @@ const corsOrigins = (process.env.CORS_ORIGIN || "")
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-if (corsOrigins.length > 0) {
-    app.use(cors({ origin: corsOrigins }));
-} else if (process.env.NODE_ENV !== "production") {
-    app.use(cors({ origin: true }));
+const allowedCorsOrigins = new Set(corsOrigins);
+
+if (!IS_PRODUCTION) {
+    [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:5500",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:5500"
+    ].forEach((origin) => allowedCorsOrigins.add(origin));
+
+    allowedCorsOrigins.add(`http://localhost:${PORT}`);
+    allowedCorsOrigins.add(`http://127.0.0.1:${PORT}`);
 }
 
-app.use(helmet({ contentSecurityPolicy: false }));
+if (allowedCorsOrigins.size > 0) {
+    app.use(
+        cors({
+            origin(origin, callback) {
+                if (!origin || allowedCorsOrigins.has(origin)) {
+                    return callback(null, true);
+                }
+
+                return callback(new Error("Not allowed by CORS"));
+            },
+            credentials: true
+        })
+    );
+}
+
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "https://js.stripe.com"],
+                styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+                fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+                imgSrc: ["'self'", "data:", "https:"],
+                connectSrc: ["'self'", "https://api.stripe.com"],
+                frameSrc: ["'self'", "https://js.stripe.com", "https://checkout.stripe.com"],
+                frameAncestors: ["'none'"],
+                objectSrc: ["'none'"],
+                baseUri: ["'self'"],
+                formAction: ["'self'", "https://checkout.stripe.com"],
+                upgradeInsecureRequests: []
+            }
+        },
+        crossOriginEmbedderPolicy: false
+    })
+);
 app.use(
     rateLimit({
         windowMs: 15 * 60 * 1000,
         max: 300,
         standardHeaders: true,
         legacyHeaders: false
+    })
+);
+app.use(
+    "/api/admin",
+    rateLimit({
+        windowMs: ADMIN_RATE_LIMIT_WINDOW_MS,
+        max: ADMIN_RATE_LIMIT_MAX,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: "Too many admin requests. Please try again later." }
     })
 );
 
@@ -403,7 +487,8 @@ function sanitizeServices(services) {
 function getAdminCredentials() {
     return {
         user: process.env.ADMIN_USER || "",
-        pass: process.env.ADMIN_PASS || ""
+        pass: process.env.ADMIN_PASS || "",
+        passHash: process.env.ADMIN_PASS_HASH || ""
     };
 }
 
@@ -427,8 +512,52 @@ function verifyPassword(password, stored) {
     }
 
     const [salt, originalHash] = stored.split(":");
+    if (!salt || !originalHash) {
+        return false;
+    }
+
     const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-    return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(originalHash, "hex"));
+    const hashBuffer = Buffer.from(hash, "hex");
+    const originalBuffer = Buffer.from(originalHash, "hex");
+
+    if (hashBuffer.length !== originalBuffer.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(hashBuffer, originalBuffer);
+}
+
+function timingSafeStringEqual(left, right) {
+    const leftBuffer = Buffer.from(String(left || ""), "utf8");
+    const rightBuffer = Buffer.from(String(right || ""), "utf8");
+
+    if (leftBuffer.length !== rightBuffer.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function decodeBasicAuthCredentials(authHeader) {
+    if (!String(authHeader || "").startsWith("Basic ")) {
+        return null;
+    }
+
+    try {
+        const decoded = Buffer.from(authHeader.replace("Basic ", ""), "base64").toString("utf8");
+        const separatorIndex = decoded.indexOf(":");
+
+        if (separatorIndex < 0) {
+            return null;
+        }
+
+        return {
+            user: decoded.slice(0, separatorIndex),
+            pass: decoded.slice(separatorIndex + 1)
+        };
+    } catch (error) {
+        return null;
+    }
 }
 
 function createClientToken(client) {
@@ -448,6 +577,77 @@ function createClientToken(client) {
     return `${payload}.${signature}`;
 }
 
+function parseCookies(req) {
+    const raw = String(req.headers.cookie || "");
+    if (!raw) {
+        return {};
+    }
+
+    return raw.split(";").reduce((acc, entry) => {
+        const separatorIndex = entry.indexOf("=");
+        if (separatorIndex <= 0) {
+            return acc;
+        }
+
+        let key = "";
+        let value = "";
+
+        try {
+            key = decodeURIComponent(entry.slice(0, separatorIndex).trim());
+            value = decodeURIComponent(entry.slice(separatorIndex + 1).trim());
+        } catch (error) {
+            return acc;
+        }
+
+        acc[key] = value;
+        return acc;
+    }, {});
+}
+
+function readCookie(req, cookieName) {
+    const cookies = parseCookies(req);
+    return String(cookies[cookieName] || "").trim();
+}
+
+function buildSessionCookieOptions(httpOnly = true) {
+    return {
+        httpOnly,
+        secure: IS_PRODUCTION,
+        sameSite: "lax",
+        maxAge: CLIENT_SESSION_MAX_AGE_MS,
+        path: "/"
+    };
+}
+
+function attachClientSession(res, client) {
+    const token = createClientToken(client);
+    const csrfToken = crypto.randomBytes(32).toString("hex");
+
+    res.cookie(CLIENT_SESSION_COOKIE, token, buildSessionCookieOptions(true));
+    res.cookie(CLIENT_CSRF_COOKIE, csrfToken, buildSessionCookieOptions(false));
+}
+
+function clearClientSession(res) {
+    const clearOptions = {
+        secure: IS_PRODUCTION,
+        sameSite: "lax",
+        path: "/"
+    };
+
+    res.clearCookie(CLIENT_SESSION_COOKIE, clearOptions);
+    res.clearCookie(CLIENT_CSRF_COOKIE, clearOptions);
+}
+
+function getClientTokenFromRequest(req) {
+    const authHeader = req.headers.authorization || "";
+
+    if (authHeader.startsWith("Bearer ")) {
+        return authHeader.replace("Bearer ", "").trim();
+    }
+
+    return readCookie(req, CLIENT_SESSION_COOKIE);
+}
+
 function verifyClientToken(token) {
     if (!token || typeof token !== "string" || !token.includes(".")) {
         return null;
@@ -459,7 +659,13 @@ function verifyClientToken(token) {
         .update(payload)
         .digest("base64url");
 
-    if (signature !== expectedSignature) {
+    const signatureBuffer = Buffer.from(signature, "base64url");
+    const expectedBuffer = Buffer.from(expectedSignature, "base64url");
+
+    if (
+        signatureBuffer.length !== expectedBuffer.length ||
+        !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+    ) {
         return null;
     }
 
@@ -481,12 +687,10 @@ function verifyClientToken(token) {
 }
 
 function requireClient(req, res, next) {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+    const token = getClientTokenFromRequest(req);
+    if (!token) {
         return res.status(401).json({ error: "Client authentication required" });
     }
-
-    const token = authHeader.replace("Bearer ", "").trim();
     const payload = verifyClientToken(token);
 
     if (!payload) {
@@ -497,9 +701,30 @@ function requireClient(req, res, next) {
     return next();
 }
 
+function requireCsrf(req, res, next) {
+    const csrfCookie = readCookie(req, CLIENT_CSRF_COOKIE);
+    const csrfHeader = String(req.headers["x-csrf-token"] || "").trim();
+
+    if (!csrfCookie || !csrfHeader) {
+        return res.status(403).json({ error: "CSRF token required" });
+    }
+
+    const cookieBuffer = Buffer.from(csrfCookie, "utf8");
+    const headerBuffer = Buffer.from(csrfHeader, "utf8");
+
+    if (
+        cookieBuffer.length !== headerBuffer.length ||
+        !crypto.timingSafeEqual(cookieBuffer, headerBuffer)
+    ) {
+        return res.status(403).json({ error: "Invalid CSRF token" });
+    }
+
+    return next();
+}
+
 function requireAdmin(req, res, next) {
-    const { user, pass } = getAdminCredentials();
-    if (!user || !pass) {
+    const { user, pass, passHash } = getAdminCredentials();
+    if (!user || (!passHash && !pass)) {
         return res.status(503).json({ error: "Admin access not configured" });
     }
 
@@ -509,11 +734,13 @@ function requireAdmin(req, res, next) {
         return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const decoded = Buffer.from(authHeader.replace("Basic ", ""), "base64")
-        .toString("utf8")
-        .split(":");
+    const decoded = decodeBasicAuthCredentials(authHeader);
+    const isValidUser = timingSafeStringEqual(decoded?.user, user);
+    const isValidPassword = passHash
+        ? verifyPassword(decoded?.pass || "", passHash)
+        : timingSafeStringEqual(decoded?.pass, pass);
 
-    if (decoded.length !== 2 || decoded[0] !== user || decoded[1] !== pass) {
+    if (!decoded || !isValidUser || !isValidPassword) {
         return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -548,7 +775,7 @@ app.get("/api/appointments", async (req, res) => {
         res.json(result.rows || []);
     } catch (err) {
         console.error("Database error:", err);
-        res.status(500).json({ error: err.message });
+        return sendInternalError(res, "Appointments query error:", err);
     }
 });
 
@@ -659,7 +886,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
         res.json({ sessionId: session.id });
     } catch (error) {
         console.error("Stripe Error:", error);
-        res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Create payment intent error:", error);
     }
 });
 
@@ -865,7 +1092,7 @@ app.post("/api/confirm-booking", async (req, res) => {
         }
     } catch (error) {
         console.error("Error:", error);
-        res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Confirm booking error:", error);
     }
 });
 
@@ -920,6 +1147,13 @@ app.post("/api/client/register", async (req, res) => {
         );
 
         const client = result.rows[0];
+        const clientSession = {
+            id: client.id,
+            email: client.email,
+            name: client.name
+        };
+
+        attachClientSession(res, clientSession);
 
         if (client?.email && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
             try {
@@ -942,14 +1176,13 @@ app.post("/api/client/register", async (req, res) => {
 
         return res.json({
             success: true,
-            token: createClientToken(client),
-            client
+            client: clientSession
         });
     } catch (error) {
         if (error.code === "23505") {
             return res.status(409).json({ error: "Account already exists for this email" });
         }
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client register error:", error);
     }
 });
 
@@ -968,23 +1201,28 @@ app.post("/api/client/login", async (req, res) => {
             return res.status(401).json({ error: "Invalid email or password" });
         }
 
+        const clientSession = {
+            id: client.id,
+            email: client.email,
+            name: client.name
+        };
+
+        attachClientSession(res, clientSession);
+
         return res.json({
             success: true,
-            token: createClientToken(client),
-            client: {
-                id: client.id,
-                email: client.email,
-                name: client.name
-            }
+            client: clientSession
         });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client login error:", error);
     }
 });
 
 app.post("/api/client/forgot-password", async (req, res) => {
     try {
         const email = normalizeEmail(req.body?.email || "");
+        let debugResetLink = "";
+        let emailDispatchFailed = false;
 
         if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
             return res.status(400).json({ error: "Valid email is required" });
@@ -1001,6 +1239,12 @@ app.post("/api/client/forgot-password", async (req, res) => {
             const rawToken = crypto.randomBytes(32).toString("hex");
             const tokenHash = hashResetToken(rawToken);
             const expiry = new Date(Date.now() + 60 * 60 * 1000);
+            const apiOrigin = `${req.protocol}://${req.get("host")}`;
+            const resetLink = `${PUBLIC_APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}&api=${encodeURIComponent(apiOrigin)}`;
+
+            if (!IS_PRODUCTION) {
+                debugResetLink = resetLink;
+            }
 
             await pool.query(
                 "UPDATE clients SET reset_password_token_hash = $1, reset_password_expires_at = $2 WHERE id = $3",
@@ -1009,7 +1253,6 @@ app.post("/api/client/forgot-password", async (req, res) => {
 
             if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
                 try {
-                    const resetLink = `${PUBLIC_APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}`;
                     await transporter.sendMail({
                         from: process.env.EMAIL_USER,
                         to: email,
@@ -1023,16 +1266,35 @@ app.post("/api/client/forgot-password", async (req, res) => {
                     });
                 } catch (emailError) {
                     console.error("Password reset email error:", emailError);
+                    emailDispatchFailed = true;
                 }
+            } else {
+                emailDispatchFailed = true;
+            }
+
+            if (IS_PRODUCTION && emailDispatchFailed) {
+                return res.status(503).json({
+                    error: "Unable to send reset email right now. Please try again later."
+                });
             }
         }
 
-        return res.json({
+        const payload = {
             success: true,
             message: "If an account exists for this email, a reset link has been sent."
-        });
+        };
+
+        if (!IS_PRODUCTION && debugResetLink) {
+            payload.debugResetLink = debugResetLink;
+            if (emailDispatchFailed) {
+                payload.message =
+                    "Email delivery is unavailable locally. Use the generated reset link below.";
+            }
+        }
+
+        return res.json(payload);
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client forgot-password error:", error);
     }
 });
 
@@ -1042,8 +1304,8 @@ app.post("/api/client/reset-password", async (req, res) => {
         const token = String(req.body?.token || "").trim();
         const password = String(req.body?.password || "");
 
-        if (!email || !token) {
-            return res.status(400).json({ error: "Email and token are required" });
+        if (!token) {
+            return res.status(400).json({ error: "Reset token is required" });
         }
 
         if (password.length < 8) {
@@ -1053,19 +1315,22 @@ app.post("/api/client/reset-password", async (req, res) => {
         const tokenHash = hashResetToken(token);
         const result = await pool.query(
             `
-                SELECT id
+                SELECT id, email
                 FROM clients
-                WHERE LOWER(email) = LOWER($1)
-                  AND reset_password_token_hash = $2
+                WHERE reset_password_token_hash = $1
                   AND reset_password_expires_at IS NOT NULL
                   AND reset_password_expires_at > NOW()
                 LIMIT 1
             `,
-            [email, tokenHash]
+            [tokenHash]
         );
 
         const client = result.rows[0];
         if (!client) {
+            return res.status(400).json({ error: "Invalid or expired reset link" });
+        }
+
+        if (email && normalizeEmail(client.email) !== email) {
             return res.status(400).json({ error: "Invalid or expired reset link" });
         }
 
@@ -1082,8 +1347,23 @@ app.post("/api/client/reset-password", async (req, res) => {
 
         return res.json({ success: true, message: "Password updated successfully" });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client reset-password error:", error);
     }
+});
+
+app.get("/api/client/session", requireClient, async (req, res) => {
+    return res.json({
+        success: true,
+        client: {
+            id: req.clientAuth.id,
+            email: req.clientAuth.email
+        }
+    });
+});
+
+app.post("/api/client/logout", requireClient, requireCsrf, async (req, res) => {
+    clearClientSession(res);
+    return res.json({ success: true });
 });
 
 app.get("/api/client/appointments", requireClient, async (req, res) => {
@@ -1112,11 +1392,11 @@ app.get("/api/client/appointments", requireClient, async (req, res) => {
 
         return res.json(result.rows || []);
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client appointments error:", error);
     }
 });
 
-app.post("/api/client/appointments/:id/reschedule", requireClient, async (req, res) => {
+app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, async (req, res) => {
     try {
         const appointmentId = Number(req.params.id);
         const email = normalizeEmail(req.clientAuth?.email || "");
@@ -1173,11 +1453,11 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, async (req, r
 
         return res.json({ success: true, date, time });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client reschedule error:", error);
     }
 });
 
-app.post("/api/client/appointments/:id/cancel", requireClient, async (req, res) => {
+app.post("/api/client/appointments/:id/cancel", requireClient, requireCsrf, async (req, res) => {
     try {
         const appointmentId = Number(req.params.id);
         const email = normalizeEmail(req.clientAuth?.email || "");
@@ -1213,7 +1493,7 @@ app.post("/api/client/appointments/:id/cancel", requireClient, async (req, res) 
 
         return res.json({ success: true, feePercent });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Client cancel error:", error);
     }
 });
 
@@ -1235,7 +1515,7 @@ app.post("/api/admin/appointments/:id/no-show", requireAdmin, async (req, res) =
 
         return res.json({ success: true, id: result.rows[0].id });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Admin no-show error:", error);
     }
 });
 
@@ -1264,7 +1544,7 @@ app.post("/api/admin/appointments/:id/reverse-no-show", requireAdmin, async (req
 
         return res.json({ success: true, id: result.rows[0].id });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Admin reverse no-show error:", error);
     }
 });
 
@@ -1300,7 +1580,7 @@ app.post("/api/admin/expenses", requireAdmin, async (req, res) => {
 
         return res.json({ success: true, expense: result.rows[0] });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Admin expense create error:", error);
     }
 });
 
@@ -1390,7 +1670,7 @@ app.get("/api/admin/finance", requireAdmin, async (req, res) => {
             expenses
         });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return sendInternalError(res, "Admin finance error:", error);
     }
 });
 
@@ -1527,7 +1807,7 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
         });
     } catch (err) {
         console.error("Admin analytics error:", err);
-        return res.status(500).json({ error: err.message });
+        return sendInternalError(res, "Admin analytics error:", err);
     }
 });
 
@@ -1539,7 +1819,7 @@ app.get("/api/admin/appointments", requireAdmin, async (req, res) => {
         res.json(result.rows || []);
     } catch (err) {
         console.error("Admin query error:", err);
-        res.status(500).json({ error: err.message });
+        return sendInternalError(res, "Admin appointments query error:", err);
     }
 });
 
@@ -1558,7 +1838,7 @@ app.post("/api/admin/appointments/:id/cancel", requireAdmin, async (req, res) =>
         res.json({ success: true, id: result.rows[0].id });
     } catch (err) {
         console.error("Admin cancel error:", err);
-        res.status(500).json({ error: err.message });
+        return sendInternalError(res, "Admin cancel appointment error:", err);
     }
 });
 

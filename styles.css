@@ -411,6 +411,15 @@ button:hover {
     transform: translateY(-2px);
 }
 
+button.locked-submit,
+button.locked-submit:hover {
+    background: #d4d4d4;
+    border: 1px solid #c1c1c1;
+    color: #666;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .service-item button:disabled,
 .service-item .call-to-book-btn {
     background: #d4d4d4;

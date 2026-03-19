@@ -88,6 +88,15 @@ function formatPercent(value) {
     return `${parsed.toFixed(1)}%`;
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function toIsoDate(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -181,7 +190,7 @@ function renderAppointments(appointments) {
         const services = (() => {
             try {
                 return JSON.parse(appointment.services || "[]")
-                    .map((service) => service.name)
+                    .map((service) => escapeHtml(service?.name || ""))
                     .join(", ");
             } catch (err) {
                 return "";
@@ -189,13 +198,13 @@ function renderAppointments(appointments) {
         })();
 
         row.innerHTML = `
-            <td>${appointment.date || "-"}</td>
-            <td>${appointment.time || "-"}</td>
-            <td>${appointment.name || "-"}</td>
-            <td>${appointment.email || "-"}</td>
-            <td>${appointment.phone || "-"}</td>
+            <td>${escapeHtml(appointment.date || "-")}</td>
+            <td>${escapeHtml(appointment.time || "-")}</td>
+            <td>${escapeHtml(appointment.name || "-")}</td>
+            <td>${escapeHtml(appointment.email || "-")}</td>
+            <td>${escapeHtml(appointment.phone || "-")}</td>
             <td>${services || "-"}</td>
-            <td>${appointment.status || "-"}</td>
+            <td>${escapeHtml(appointment.status || "-")}</td>
             <td></td>
         `;
 
@@ -301,9 +310,9 @@ function renderFinance(finance) {
     expenses.forEach((expense) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-            <td>${expense.date || "-"}</td>
-            <td>${expense.category || "-"}</td>
-            <td>${expense.description || "-"}</td>
+            <td>${escapeHtml(expense.date || "-")}</td>
+            <td>${escapeHtml(expense.category || "-")}</td>
+            <td>${escapeHtml(expense.description || "-")}</td>
             <td>${formatCurrency(expense.amount_cents || 0)}</td>
         `;
         expensesTableBody.appendChild(row);
@@ -335,7 +344,7 @@ function renderDailyAnalytics(dailyRows) {
     visibleRows.forEach((rowData) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-            <td>${rowData.date || "-"}</td>
+            <td>${escapeHtml(rowData.date || "-")}</td>
             <td>${rowData.appointments ?? 0}</td>
             <td>${rowData.confirmed ?? 0}</td>
             <td>${rowData.cancelled ?? 0}</td>
@@ -358,7 +367,7 @@ function renderTopServices(services) {
     services.forEach((service) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-            <td>${service.name || "-"}</td>
+            <td>${escapeHtml(service.name || "-")}</td>
             <td>${service.count ?? 0}</td>
             <td>${formatCurrency(service.revenueCents || 0)}</td>
         `;

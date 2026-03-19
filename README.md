@@ -77,7 +77,17 @@ DATABASE_URL=postgres://user:password@localhost:5432/lunelia
 Set admin credentials in `.env` to access `/admin.html`:
 ```
 ADMIN_USER=admin
-ADMIN_PASS=change-this-password
+ADMIN_PASS_HASH=replace-with-scrypt-hash
+ADMIN_RATE_LIMIT_WINDOW_MS=900000
+ADMIN_RATE_LIMIT_MAX=100
+```
+
+`ADMIN_PASS_HASH` is preferred. `ADMIN_PASS` still works as a legacy fallback for local development, but should not be used in production.
+
+#### Client Session Security:
+Set a strong random secret (32+ chars recommended):
+```
+CLIENT_TOKEN_SECRET=replace-with-a-random-64-character-secret
 ```
 
 ### 5. Run the Server
@@ -178,6 +188,12 @@ List all appointments (basic auth required)
 ### POST `/api/admin/appointments/:id/cancel`
 Cancel an appointment (basic auth required)
 
+### GET `/api/client/session`
+Return current signed-in client (cookie session required)
+
+### POST `/api/client/logout`
+Clear client session cookie (cookie session + CSRF header required)
+
 ## Testing
 
 ### Test Card Numbers (Stripe)
@@ -215,6 +231,16 @@ Run: `npm install`
 ### Stripe errors
 - Check `STRIPE_PUBLIC_KEY`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` in `.env`
 - Use test keys (start with `pk_test_` and `sk_test_`)
+
+## Security Operations Checklist
+
+- Run `npm audit` before each deploy and patch high/critical findings.
+- Monitor server logs for repeated 401/403/409 patterns and payment/webhook failures.
+- Use least-privilege DB credentials (application user should not be superuser).
+- Back up PostgreSQL on a schedule and test restore at least monthly.
+- Rotate secrets (`STRIPE_SECRET_KEY`, `EMAIL_PASS`, `CLIENT_TOKEN_SECRET`, admin creds) on a regular cadence.
+- Keep admin throttling tight with `ADMIN_RATE_LIMIT_WINDOW_MS` and `ADMIN_RATE_LIMIT_MAX`, especially before production.
+- Schedule periodic security testing (automated scans + manual penetration tests).
 
 ## Next Steps (Optional Enhancements)
 

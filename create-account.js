@@ -29,6 +29,7 @@ form?.addEventListener("submit", async (event) => {
     try {
         const response = await fetch(`${API_BASE}/api/client/register`, {
             method: "POST",
+            credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, email, password })
         });
@@ -38,7 +39,6 @@ form?.addEventListener("submit", async (event) => {
             throw new Error(data?.error || "Account creation failed");
         }
 
-        localStorage.setItem("clientToken", data.token);
         window.location.href = "client.html";
     } catch (error) {
         setMessage(error.message || "Unable to create account");

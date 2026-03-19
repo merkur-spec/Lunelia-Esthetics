@@ -13,7 +13,6 @@ const rescheduleCancelButton = document.getElementById("client-reschedule-cancel
 const rescheduleTarget = document.getElementById("client-reschedule-target");
 const rescheduleMessage = document.getElementById("client-reschedule-message");
 
-const TOKEN_KEY = "clientToken";
 const API_BASES = (() => {
     const bases = [""];
     const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
@@ -32,16 +31,24 @@ const API_BASES = (() => {
 
 let activeReschedule = null;
 
-function getToken() {
-    return localStorage.getItem(TOKEN_KEY) || "";
+function getCookie(name) {
+    const cookies = document.cookie ? document.cookie.split(";") : [];
+
+    for (const cookie of cookies) {
+        const [rawKey, ...rawValueParts] = cookie.split("=");
+        const key = decodeURIComponent(String(rawKey || "").trim());
+        if (key !== name) {
+            continue;
+        }
+
+        return decodeURIComponent(rawValueParts.join("=").trim());
+    }
+
+    return "";
 }
 
-function setToken(token) {
-    if (!token) {
-        localStorage.removeItem(TOKEN_KEY);
-        return;
-    }
-    localStorage.setItem(TOKEN_KEY, token);
+function getCsrfToken() {
+    return getCookie("clientCsrf");
 }
 
 function setMessage(message, inDashboard = false) {
@@ -105,7 +112,10 @@ async function fetchFromApi(path, options = {}) {
 
     for (const base of API_BASES) {
         try {
-            const response = await fetch(`${base}${path}`, options);
+            const response = await fetch(`${base}${path}`, {
+                ...options,
+                credentials: "include"
+            });
             return response;
         } catch (error) {
             lastNetworkError = error;
@@ -294,13 +304,21 @@ function openReschedulePanel(appointment) {
 }
 
 async function fetchClientJson(url, options = {}) {
-    const token = getToken();
+    const method = String(options.method || "GET").toUpperCase();
+    const headers = {
+        ...(options.headers || {})
+    };
+
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+        }
+    }
+
     const response = await fetchFromApi(url, {
         ...options,
-        headers: {
-            ...(options.headers || {}),
-            Authorization: `Bearer ${token}`
-        }
+        headers
     });
 
     const data = await response.json().catch(() => null);
@@ -395,7 +413,6 @@ loginForm?.addEventListener("submit", async (event) => {
             throw new Error(data?.error || "Sign in failed");
         }
 
-        setToken(data.token);
         showDashboard(true);
         setMessage("Signed in.", true);
         await loadAppointments();
@@ -404,8 +421,16 @@ loginForm?.addEventListener("submit", async (event) => {
     }
 });
 
-logoutButton?.addEventListener("click", () => {
-    setToken("");
+logoutButton?.addEventListener("click", async () => {
+    try {
+        await fetchClientJson("/api/client/logout", {
+            method: "POST"
+        });
+    } catch (error) {
+        setMessage(error.message, true);
+        return;
+    }
+
     closeReschedulePanel();
     showDashboard(false);
     setMessage("Signed out.", false);
@@ -454,14 +479,13 @@ rescheduleSaveButton?.addEventListener("click", async () => {
 });
 
 (async function init() {
-    if (getToken()) {
-        try {
-            showDashboard(true);
-            await loadAppointments();
-            return;
-        } catch (error) {
-            setToken("");
-        }
+    try {
+        await fetchClientJson("/api/client/session");
+        showDashboard(true);
+        await loadAppointments();
+        return;
+    } catch (error) {
+        closeReschedulePanel();
     }
 
     showDashboard(false);
