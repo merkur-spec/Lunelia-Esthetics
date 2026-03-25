@@ -4,6 +4,7 @@ const authMessage = document.getElementById("client-auth-message");
 const dashboardMessage = document.getElementById("client-dashboard-message");
 const loginForm = document.getElementById("client-login-form");
 const appointmentsBody = document.querySelector("#client-appointments-table tbody");
+const pastAppointmentsBody = document.querySelector("#client-past-appointments-table tbody");
 const logoutButton = document.getElementById("client-logout");
 const reschedulePanel = document.getElementById("client-reschedule-panel");
 const rescheduleDateInput = document.getElementById("client-reschedule-date");
@@ -13,13 +14,25 @@ const rescheduleCancelButton = document.getElementById("client-reschedule-cancel
 const rescheduleTarget = document.getElementById("client-reschedule-target");
 const rescheduleMessage = document.getElementById("client-reschedule-message");
 
+function formatStatus(status) {
+    const map = {
+        confirmed: "Confirmed",
+        late: "Late",
+        cancelled: "Cancelled",
+        no_show: "No-show",
+        completed: "Completed"
+    };
+    const key = String(status || "").toLowerCase();
+    return map[key] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : "-");
+}
+
 const API_BASES = (() => {
     const bases = [""];
     const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
     if (isLocal) {
-        if (window.location.port !== "5500") {
-            bases.push("http://localhost:5500");
+        if (window.location.port !== "3001") {
+            bases.push("http://localhost:3001");
         }
         if (window.location.port !== "3000") {
             bases.push("http://localhost:3000");
@@ -330,68 +343,108 @@ async function fetchClientJson(url, options = {}) {
 }
 
 async function loadAppointments() {
-    const appointments = await fetchClientJson("/api/client/appointments");
+    const [appointments, pastAppointments] = await Promise.all([
+        fetchClientJson("/api/client/appointments"),
+        fetchClientJson("/api/client/appointments/past")
+    ]);
+
     appointmentsBody.innerHTML = "";
+    if (pastAppointmentsBody) {
+        pastAppointmentsBody.innerHTML = "";
+    }
 
     if (!appointments || appointments.length === 0) {
         const row = document.createElement("tr");
         row.innerHTML = '<td colspan="5">No appointments found for this account.</td>';
         appointmentsBody.appendChild(row);
+    } else {
+        appointments.forEach((appointment) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td data-label="Date">${appointment.date || "-"}</td>
+                <td data-label="Time">${appointment.time || "-"}</td>
+                <td data-label="Services">${parseServices(appointment.services) || "-"}</td>
+                <td data-label="Status">${formatStatus(appointment.status)}</td>
+                <td data-label="Action"></td>
+            `;
+
+            const actionCell = row.querySelector("td:last-child");
+
+            const isActiveAppointment = ["confirmed", "late"].includes(
+                String(appointment.status || "").toLowerCase()
+            );
+
+            const rescheduleBtn = document.createElement("button");
+            rescheduleBtn.type = "button";
+            rescheduleBtn.textContent = "Reschedule";
+            rescheduleBtn.disabled = !isActiveAppointment;
+
+            rescheduleBtn.addEventListener("click", () => {
+                openReschedulePanel(appointment);
+            });
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.disabled = !isActiveAppointment;
+
+            cancelBtn.addEventListener("click", async () => {
+                const shouldCancel = window.confirm(
+                    "Are you sure you want to cancel this appointment?"
+                );
+
+                if (!shouldCancel) {
+                    return;
+                }
+
+                cancelBtn.disabled = true;
+                rescheduleBtn.disabled = true;
+                setMessage("Cancelling appointment...", true);
+
+                try {
+                    const result = await fetchClientJson(`/api/client/appointments/${appointment.id}/cancel`, {
+                        method: "POST"
+                    });
+
+                    const feeText = Number(result.feePercent) > 0
+                        ? ` A ${result.feePercent}% fee applies based on cancellation policy.`
+                        : "";
+
+                    setMessage(`Appointment cancelled.${feeText}`, true);
+                    await loadAppointments();
+                } catch (error) {
+                    setMessage(error.message, true);
+                    cancelBtn.disabled = !isActiveAppointment;
+                    rescheduleBtn.disabled = !isActiveAppointment;
+                }
+            });
+
+            actionCell.appendChild(rescheduleBtn);
+            actionCell.appendChild(cancelBtn);
+            appointmentsBody.appendChild(row);
+        });
+    }
+
+    if (!pastAppointmentsBody) {
         return;
     }
 
-    appointments.forEach((appointment) => {
+    if (!pastAppointments || pastAppointments.length === 0) {
+        const row = document.createElement("tr");
+        row.innerHTML = '<td colspan="4">No past appointments found.</td>';
+        pastAppointmentsBody.appendChild(row);
+        return;
+    }
+
+    pastAppointments.forEach((appointment) => {
         const row = document.createElement("tr");
         row.innerHTML = `
             <td data-label="Date">${appointment.date || "-"}</td>
             <td data-label="Time">${appointment.time || "-"}</td>
             <td data-label="Services">${parseServices(appointment.services) || "-"}</td>
-            <td data-label="Status">${appointment.status || "-"}</td>
-            <td data-label="Action"></td>
+            <td data-label="Status">${formatStatus(appointment.status)}</td>
         `;
-
-        const actionCell = row.querySelector("td:last-child");
-
-        const rescheduleBtn = document.createElement("button");
-        rescheduleBtn.type = "button";
-        rescheduleBtn.textContent = "Reschedule";
-        rescheduleBtn.disabled = appointment.status !== "confirmed";
-
-        rescheduleBtn.addEventListener("click", () => {
-            openReschedulePanel(appointment);
-        });
-
-        const cancelBtn = document.createElement("button");
-        cancelBtn.type = "button";
-        cancelBtn.textContent = "Cancel";
-        cancelBtn.disabled = appointment.status !== "confirmed";
-
-        cancelBtn.addEventListener("click", async () => {
-            cancelBtn.disabled = true;
-            rescheduleBtn.disabled = true;
-            setMessage("Cancelling appointment...", true);
-
-            try {
-                const result = await fetchClientJson(`/api/client/appointments/${appointment.id}/cancel`, {
-                    method: "POST"
-                });
-
-                const feeText = Number(result.feePercent) > 0
-                    ? ` A ${result.feePercent}% fee applies based on cancellation policy.`
-                    : "";
-
-                setMessage(`Appointment cancelled.${feeText}`, true);
-                await loadAppointments();
-            } catch (error) {
-                setMessage(error.message, true);
-                cancelBtn.disabled = appointment.status !== "confirmed";
-                rescheduleBtn.disabled = appointment.status !== "confirmed";
-            }
-        });
-
-        actionCell.appendChild(rescheduleBtn);
-        actionCell.appendChild(cancelBtn);
-        appointmentsBody.appendChild(row);
+        pastAppointmentsBody.appendChild(row);
     });
 }
 

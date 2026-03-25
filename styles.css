@@ -230,6 +230,91 @@ body:not(.home-page):not(.booking-page) ul {
     margin: 0 auto 14px;
 }
 
+/* Two-card layout for specials page */
+.specials-page .specials-grid {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 20px 0;
+}
+
+.specials-page .specials-card {
+    background: #fff;
+    border: 1px solid #e8ddd5;
+    border-radius: 12px;
+    padding: 28px 32px;
+    max-width: 380px;
+    flex: 1 1 300px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+}
+
+.specials-page .specials-card h3 {
+    margin-top: 0;
+    margin-bottom: 6px;
+    font-size: 1.15rem;
+}
+
+.specials-page .specials-subtitle {
+    font-size: 0.82rem;
+    color: #888;
+    margin: 0 0 16px;
+    font-style: italic;
+}
+
+.specials-page .specials-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 14px;
+    text-align: center;
+}
+
+.specials-page .specials-card ul li {
+    padding: 6px 0;
+    border-bottom: 1px solid #f0e9e3;
+    font-size: 0.95rem;
+}
+
+.specials-page .specials-card ul li:last-child {
+    border-bottom: none;
+}
+
+.specials-page .specials-note {
+    font-size: 0.78rem;
+    color: #a0918a;
+    margin: 10px 0 0;
+    font-style: italic;
+}
+
+/* Applied specials box on booking/checkout page */
+.specials-applied-box {
+    background: #fdf7f0;
+    border: 1px solid #e8c99a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 10px 0;
+}
+
+.specials-applied-box h5 {
+    margin: 0 0 8px;
+    font-size: 0.9rem;
+    color: #7a5c3e;
+    letter-spacing: 0.02em;
+}
+
+.specials-applied-box ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.specials-applied-box ul li {
+    font-size: 0.88rem;
+    color: #5c4030;
+    padding: 3px 0;
+}
+
 body:not(.home-page):not(.booking-page) .content-page,
 body:not(.home-page):not(.booking-page) .content-page section,
 body:not(.home-page):not(.booking-page) .content-page h3,
@@ -595,6 +680,21 @@ input:focus-visible {
     transform: none;
 }
 
+.admin-undo-toast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #d3e3d8;
+    border-radius: 10px;
+    background: #f7fcf8;
+    color: #355243;
+}
+
 .client-info form {
     background: #f7fcf8;
     border: 1px solid #dfeee3;
@@ -878,14 +978,17 @@ table {
     padding: 30px;
 }
 
-.client-page #client-appointments-table {
+.client-page #client-appointments-table,
+.client-page #client-past-appointments-table {
     min-width: 0;
     width: 100%;
     table-layout: auto;
 }
 
 .client-page #client-appointments-table th,
-.client-page #client-appointments-table td {
+.client-page #client-appointments-table td,
+.client-page #client-past-appointments-table th,
+.client-page #client-past-appointments-table td {
     font-size: 15px;
     padding: 12px 10px;
 }
@@ -897,7 +1000,13 @@ table {
 .client-page #client-appointments-table th:nth-child(4),
 .client-page #client-appointments-table td:nth-child(4),
 .client-page #client-appointments-table th:nth-child(5),
-.client-page #client-appointments-table td:nth-child(5) {
+.client-page #client-appointments-table td:nth-child(5),
+.client-page #client-past-appointments-table th:nth-child(1),
+.client-page #client-past-appointments-table td:nth-child(1),
+.client-page #client-past-appointments-table th:nth-child(2),
+.client-page #client-past-appointments-table td:nth-child(2),
+.client-page #client-past-appointments-table th:nth-child(4),
+.client-page #client-past-appointments-table td:nth-child(4) {
     white-space: nowrap;
 }
 
@@ -936,12 +1045,60 @@ table {
     background: #fafdfb;
 }
 
+.admin-action-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+    flex-wrap: nowrap;
+}
+
+.admin-action-select {
+    height: 30px;
+    width: 92px;
+    min-width: 92px;
+    max-width: 92px;
+    border: 1px solid #c8d9cc;
+    border-radius: 4px;
+    padding: 2px 4px;
+    background: #fff;
+    color: #355243;
+    font-family: inherit;
+    font-size: 11px;
+    box-sizing: border-box;
+}
+
+.admin-action-select:focus-visible {
+    outline: 3px solid rgba(95, 143, 116, 0.28);
+    outline-offset: 2px;
+}
+
+.admin-action-confirm {
+    height: 30px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    min-width: auto;
+    font-size: 12px;
+}
+
 #appointments-table td:nth-child(6) {
-    min-width: 240px;
+    min-width: 0;
 }
 
 #appointments-table {
-    min-width: 920px;
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+}
+
+#appointments-table td,
+#appointments-table th {
+    word-break: break-word;
+}
+
+#appointments-table td:last-child,
+#appointments-table th:last-child {
+    width: 110px;
 }
 
 #analytics-daily-table,
@@ -1032,7 +1189,6 @@ table {
     margin-bottom: 14px;
 }
 
-#appointments-table td:last-child,
 #client-appointments-table td:last-child {
     display: flex;
     gap: 8px;
@@ -1078,6 +1234,36 @@ table {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+}
+
+.client-page .client-reschedule-panel .time-wrapper {
+    margin: 0 auto;
+    text-align: center;
+}
+
+.client-page .client-reschedule-panel .time-slots-table {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.client-page .client-reschedule-panel .client-reschedule-actions {
+    justify-content: center;
+    align-items: center;
+}
+
+.admin-page .admin-reschedule-panel .time-wrapper {
+    margin: 0 auto;
+    text-align: center;
+}
+
+.admin-page .admin-reschedule-panel .time-slots-table {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.admin-page .admin-reschedule-panel .client-reschedule-actions {
+    justify-content: center;
+    align-items: center;
 }
 
 .analytics-filter {
@@ -1442,6 +1628,7 @@ footer {
     .admin-page #expenses-table td:nth-child(2)::before { content: "Category: "; font-weight: 600; color: #466551; }
     .admin-page #expenses-table td:nth-child(3)::before { content: "Description: "; font-weight: 600; color: #466551; }
     .admin-page #expenses-table td:nth-child(4)::before { content: "Amount: "; font-weight: 600; color: #466551; }
+    .admin-page #expenses-table td:nth-child(5)::before { content: "Action: "; font-weight: 600; color: #466551; }
 
     .admin-page #appointments-table td:last-child {
         display: flex;
@@ -1623,7 +1810,8 @@ footer {
         padding: 16px;
     }
 
-    .client-page #client-appointments-table {
+    .client-page #client-appointments-table,
+    .client-page #client-past-appointments-table {
         min-width: 0;
         font-size: 13px;
     }
@@ -1633,7 +1821,9 @@ footer {
     }
 
     .client-page #client-appointments-table th,
-    .client-page #client-appointments-table td {
+    .client-page #client-appointments-table td,
+    .client-page #client-past-appointments-table th,
+    .client-page #client-past-appointments-table td {
         font-size: 13px;
         padding: 9px 8px;
     }
@@ -1647,19 +1837,25 @@ footer {
         padding: 7px 10px;
     }
 
-    .client-page #client-appointments-table thead {
+    .client-page #client-appointments-table thead,
+    .client-page #client-past-appointments-table thead {
         display: none;
     }
 
     .client-page #client-appointments-table,
     .client-page #client-appointments-table tbody,
     .client-page #client-appointments-table tr,
-    .client-page #client-appointments-table td {
+    .client-page #client-appointments-table td,
+    .client-page #client-past-appointments-table,
+    .client-page #client-past-appointments-table tbody,
+    .client-page #client-past-appointments-table tr,
+    .client-page #client-past-appointments-table td {
         display: block;
         width: 100%;
     }
 
-    .client-page #client-appointments-table tr {
+    .client-page #client-appointments-table tr,
+    .client-page #client-past-appointments-table tr {
         border: 1px solid #dbe9df;
         border-radius: 10px;
         padding: 10px;
@@ -1667,13 +1863,15 @@ footer {
         background: #fff;
     }
 
-    .client-page #client-appointments-table td {
+    .client-page #client-appointments-table td,
+    .client-page #client-past-appointments-table td {
         border: 0;
         padding: 6px 0;
         white-space: normal;
     }
 
-    .client-page #client-appointments-table td::before {
+    .client-page #client-appointments-table td::before,
+    .client-page #client-past-appointments-table td::before {
         content: attr(data-label) ": ";
         font-weight: 600;
         color: #466551;
@@ -1702,7 +1900,9 @@ footer {
     }
 
     .client-page .client-reschedule-actions {
-        display: grid;
-        grid-template-columns: 1fr;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
     }
 }

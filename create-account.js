@@ -1,6 +1,6 @@
 const form = document.getElementById("create-account-form");
 const message = document.getElementById("create-account-message");
-const API_BASE = window.location.port === "5500" ? "http://localhost:3000" : "";
+const API_BASE = window.location.port === "3001" ? "http://localhost:3001" : "";
 
 function setMessage(text) {
     if (message) {

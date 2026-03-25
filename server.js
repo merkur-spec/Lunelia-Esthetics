@@ -15,11 +15,19 @@ const PORT = process.env.PORT || 3000;
 const WEBHOOK_PATH = "/api/webhook";
 const jsonParser = express.json({ limit: "1mb" });
 const CLIENT_TOKEN_SECRET = String(process.env.CLIENT_TOKEN_SECRET || "").trim();
-const PUBLIC_APP_URL = process.env.FRONTEND_URL || process.env.DOMAIN || "http://localhost:5500";
+const ADMIN_TOKEN_SECRET = String(process.env.ADMIN_TOKEN_SECRET || CLIENT_TOKEN_SECRET).trim();
+const PUBLIC_APP_URL = String(
+    process.env.FRONTEND_URL || process.env.DOMAIN || "http://localhost:3001"
+)
+    .trim()
+    .replace(/\/+$/, "");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const CLIENT_SESSION_COOKIE = "clientSession";
 const CLIENT_CSRF_COOKIE = "clientCsrf";
 const CLIENT_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+const ADMIN_SESSION_COOKIE = "adminSession";
+const ADMIN_CSRF_COOKIE = "adminCsrf";
+const ADMIN_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 const ADMIN_RATE_LIMIT_WINDOW_MS = parsePositiveIntEnv(
     "ADMIN_RATE_LIMIT_WINDOW_MS",
     15 * 60 * 1000
@@ -85,10 +93,10 @@ if (!IS_PRODUCTION) {
     [
         "http://localhost:3000",
         "http://localhost:3001",
-        "http://localhost:5500",
+        "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
-        "http://127.0.0.1:5500"
+        "http://127.0.0.1:3001"
     ].forEach((origin) => allowedCorsOrigins.add(origin));
 
     allowedCorsOrigins.add(`http://localhost:${PORT}`);
@@ -329,6 +337,12 @@ async function initializeDatabase() {
             "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS referred_by_email TEXT"
         );
         await pool.query(
+            "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS applied_specials TEXT"
+        );
+        await pool.query(
+            "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS discount_cents INTEGER DEFAULT 0"
+        );
+        await pool.query(
             "ALTER TABLE clients ADD COLUMN IF NOT EXISTS reset_password_token_hash TEXT"
         );
         await pool.query(
@@ -484,12 +498,100 @@ function sanitizeServices(services) {
     return sanitized.length > 0 ? sanitized : null;
 }
 
+/**
+ * Returns which promotional specials apply for this email + services + referral.
+ * priceOverridesCents: { serviceId: priceInCents } — overrides canonical price for that service
+ * flatDiscountCents: total cents to subtract from the final amount
+ * isFree: true when loyalty wax-pass makes the entire booking complimentary
+ */
+async function getApplicableSpecials(email, sanitizedServices, referralEmail) {
+    const result = {
+        specials: [],
+        priceOverridesCents: {},
+        flatDiscountCents: 0,
+        isFree: false
+    };
+
+    if (!email || !sanitizedServices || sanitizedServices.length === 0) {
+        return result;
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+
+    // --- New client check ---
+    const priorCount = await pool.query(
+        `SELECT COUNT(*) FROM appointments
+         WHERE LOWER(email) = $1 AND status IN ('confirmed','late','completed','no_show')`,
+        [normalizedEmail]
+    );
+    const priorAppointments = parseInt(priorCount.rows[0].count, 10);
+    const isNewClient = priorAppointments === 0;
+
+    if (isNewClient) {
+        const hasBrazilian = sanitizedServices.some((s) => s.id === "brazilian");
+        if (hasBrazilian) {
+            result.priceOverridesCents["brazilian"] = 5500; // $55.00
+            result.specials.push({ type: "new_client_brazilian", label: "\u2728 New Client Special: First Brazilian — $55" });
+        }
+        const hasBikini = sanitizedServices.some((s) => s.id === "bikini-full");
+        if (hasBikini) {
+            // Bikini Full is already $48 — label only, no price change needed
+            result.specials.push({ type: "new_client_bikini", label: "\u2728 New Client Special: First Bikini Full — $48" });
+        }
+    }
+
+    // --- Loyalty (Wax Pass) check ---
+    const completedCount = await pool.query(
+        `SELECT COUNT(*) FROM appointments
+         WHERE LOWER(email) = $1 AND status = 'completed'`,
+        [normalizedEmail]
+    );
+    const numCompleted = parseInt(completedCount.rows[0].count, 10);
+    if (numCompleted > 0 && numCompleted % 9 === 0) {
+        result.isFree = true;
+        result.specials.push({ type: "loyalty_free", label: "\uD83C\uDF89 Wax Pass: Your 10th service is FREE!" });
+    }
+
+    // --- Referral discount ($10 off) ---
+    if (referralEmail) {
+        const normalizedReferral = normalizeEmail(referralEmail);
+        if (normalizedReferral && normalizedReferral !== normalizedEmail) {
+            const referrerExists = await pool.query(
+                `SELECT id FROM appointments
+                 WHERE LOWER(email) = $1 AND status IN ('confirmed','late','completed')
+                 LIMIT 1`,
+                [normalizedReferral]
+            );
+            if (referrerExists.rows.length > 0) {
+                result.flatDiscountCents += 1000; // $10.00
+                result.specials.push({ type: "referral", label: "\uD83D\uDC9D Referral Discount: $10 off" });
+            }
+        }
+    }
+
+    return result;
+}
+
 function getAdminCredentials() {
     return {
         user: process.env.ADMIN_USER || "",
         pass: process.env.ADMIN_PASS || "",
         passHash: process.env.ADMIN_PASS_HASH || ""
     };
+}
+
+function validateAdminCredentials(userInput, passInput) {
+    const { user, pass, passHash } = getAdminCredentials();
+    if (!user || (!passHash && !pass)) {
+        return false;
+    }
+
+    const isValidUser = timingSafeStringEqual(userInput, user);
+    const isValidPassword = passHash
+        ? verifyPassword(passInput || "", passHash)
+        : timingSafeStringEqual(passInput, pass);
+
+    return isValidUser && isValidPassword;
 }
 
 function normalizeEmail(value) {
@@ -577,6 +679,23 @@ function createClientToken(client) {
     return `${payload}.${signature}`;
 }
 
+function createAdminToken(adminUser) {
+    const payload = Buffer.from(
+        JSON.stringify({
+            user: String(adminUser || "").trim(),
+            role: "admin",
+            exp: Math.floor(Date.now() / 1000) + Math.floor(ADMIN_SESSION_MAX_AGE_MS / 1000)
+        })
+    ).toString("base64url");
+
+    const signature = crypto
+        .createHmac("sha256", ADMIN_TOKEN_SECRET)
+        .update(payload)
+        .digest("base64url");
+
+    return `${payload}.${signature}`;
+}
+
 function parseCookies(req) {
     const raw = String(req.headers.cookie || "");
     if (!raw) {
@@ -609,12 +728,12 @@ function readCookie(req, cookieName) {
     return String(cookies[cookieName] || "").trim();
 }
 
-function buildSessionCookieOptions(httpOnly = true) {
+function buildSessionCookieOptions(httpOnly = true, maxAge = CLIENT_SESSION_MAX_AGE_MS) {
     return {
         httpOnly,
         secure: IS_PRODUCTION,
         sameSite: "lax",
-        maxAge: CLIENT_SESSION_MAX_AGE_MS,
+        maxAge,
         path: "/"
     };
 }
@@ -625,6 +744,14 @@ function attachClientSession(res, client) {
 
     res.cookie(CLIENT_SESSION_COOKIE, token, buildSessionCookieOptions(true));
     res.cookie(CLIENT_CSRF_COOKIE, csrfToken, buildSessionCookieOptions(false));
+}
+
+function attachAdminSession(res, adminUser) {
+    const token = createAdminToken(adminUser);
+    const csrfToken = crypto.randomBytes(32).toString("hex");
+
+    res.cookie(ADMIN_SESSION_COOKIE, token, buildSessionCookieOptions(true, ADMIN_SESSION_MAX_AGE_MS));
+    res.cookie(ADMIN_CSRF_COOKIE, csrfToken, buildSessionCookieOptions(false, ADMIN_SESSION_MAX_AGE_MS));
 }
 
 function clearClientSession(res) {
@@ -638,6 +765,17 @@ function clearClientSession(res) {
     res.clearCookie(CLIENT_CSRF_COOKIE, clearOptions);
 }
 
+function clearAdminSession(res) {
+    const clearOptions = {
+        secure: IS_PRODUCTION,
+        sameSite: "lax",
+        path: "/"
+    };
+
+    res.clearCookie(ADMIN_SESSION_COOKIE, clearOptions);
+    res.clearCookie(ADMIN_CSRF_COOKIE, clearOptions);
+}
+
 function getClientTokenFromRequest(req) {
     const authHeader = req.headers.authorization || "";
 
@@ -646,6 +784,16 @@ function getClientTokenFromRequest(req) {
     }
 
     return readCookie(req, CLIENT_SESSION_COOKIE);
+}
+
+function getAdminTokenFromRequest(req) {
+    const authHeader = req.headers.authorization || "";
+
+    if (authHeader.startsWith("Bearer ")) {
+        return authHeader.replace("Bearer ", "").trim();
+    }
+
+    return readCookie(req, ADMIN_SESSION_COOKIE);
 }
 
 function verifyClientToken(token) {
@@ -673,6 +821,44 @@ function verifyClientToken(token) {
         const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
 
         if (!decoded?.email || !decoded?.id || !decoded?.exp) {
+            return null;
+        }
+
+        if (decoded.exp < Math.floor(Date.now() / 1000)) {
+            return null;
+        }
+
+        return decoded;
+    } catch (error) {
+        return null;
+    }
+}
+
+function verifyAdminToken(token) {
+    if (!token || typeof token !== "string" || !token.includes(".")) {
+        return null;
+    }
+
+    const [payload, signature] = token.split(".");
+    const expectedSignature = crypto
+        .createHmac("sha256", ADMIN_TOKEN_SECRET)
+        .update(payload)
+        .digest("base64url");
+
+    const signatureBuffer = Buffer.from(signature, "base64url");
+    const expectedBuffer = Buffer.from(expectedSignature, "base64url");
+
+    if (
+        signatureBuffer.length !== expectedBuffer.length ||
+        !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+    ) {
+        return null;
+    }
+
+    try {
+        const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+
+        if (!decoded?.user || decoded?.role !== "admin" || !decoded?.exp) {
             return null;
         }
 
@@ -723,29 +909,69 @@ function requireCsrf(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-    const { user, pass, passHash } = getAdminCredentials();
-    if (!user || (!passHash && !pass)) {
-        return res.status(503).json({ error: "Admin access not configured" });
+    const token = getAdminTokenFromRequest(req);
+    if (!token) {
+        return res.status(401).json({ error: "Admin authentication required" });
     }
 
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Basic ")) {
-        res.set("WWW-Authenticate", "Basic");
-        return res.status(401).json({ error: "Unauthorized" });
+    const payload = verifyAdminToken(token);
+    if (!payload) {
+        return res.status(401).json({ error: "Invalid or expired admin session" });
     }
 
-    const decoded = decodeBasicAuthCredentials(authHeader);
-    const isValidUser = timingSafeStringEqual(decoded?.user, user);
-    const isValidPassword = passHash
-        ? verifyPassword(decoded?.pass || "", passHash)
-        : timingSafeStringEqual(decoded?.pass, pass);
+    req.adminAuth = payload;
+    return next();
+}
 
-    if (!decoded || !isValidUser || !isValidPassword) {
-        return res.status(403).json({ error: "Forbidden" });
+function requireAdminCsrf(req, res, next) {
+    const csrfCookie = readCookie(req, ADMIN_CSRF_COOKIE);
+    const csrfHeader = String(req.headers["x-csrf-token"] || "").trim();
+
+    if (!csrfCookie || !csrfHeader) {
+        return res.status(403).json({ error: "CSRF token required" });
+    }
+
+    const cookieBuffer = Buffer.from(csrfCookie, "utf8");
+    const headerBuffer = Buffer.from(csrfHeader, "utf8");
+
+    if (
+        cookieBuffer.length !== headerBuffer.length ||
+        !crypto.timingSafeEqual(cookieBuffer, headerBuffer)
+    ) {
+        return res.status(403).json({ error: "Invalid CSRF token" });
     }
 
     return next();
 }
+
+app.post("/api/admin/login", async (req, res) => {
+    try {
+        const user = String(req.body?.username || "").trim();
+        const pass = String(req.body?.password || "");
+
+        if (!user || !pass) {
+            return res.status(400).json({ error: "Username and password are required" });
+        }
+
+        if (!validateAdminCredentials(user, pass)) {
+            return res.status(401).json({ error: "Invalid admin credentials" });
+        }
+
+        attachAdminSession(res, user);
+        return res.json({ success: true, user });
+    } catch (error) {
+        return sendInternalError(res, "Admin login error:", error);
+    }
+});
+
+app.get("/api/admin/session", requireAdmin, async (req, res) => {
+    return res.json({ authenticated: true, user: req.adminAuth.user });
+});
+
+app.post("/api/admin/logout", requireAdmin, requireAdminCsrf, async (req, res) => {
+    clearAdminSession(res);
+    return res.json({ success: true });
+});
 
 // Get Stripe public key
 app.get("/api/stripe-public-key", (req, res) => {
@@ -761,7 +987,7 @@ app.get("/api/appointments", async (req, res) => {
         const { date } = req.query;
         const params = [];
         let query =
-            "SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes FROM appointments WHERE stripe_payment_id IS NOT NULL AND status = 'confirmed'";
+            "SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes FROM appointments WHERE stripe_payment_id IS NOT NULL AND status IN ('confirmed', 'late')";
 
         if (date) {
             if (!isValidDate(date)) {
@@ -776,6 +1002,138 @@ app.get("/api/appointments", async (req, res) => {
     } catch (err) {
         console.error("Database error:", err);
         return sendInternalError(res, "Appointments query error:", err);
+    }
+});
+
+// Preview which specials apply for a given email + services
+app.get("/api/booking/preview-specials", async (req, res) => {
+    try {
+        const email = String(req.query.email || "").trim();
+        const referralEmail = String(req.query.referralEmail || "").trim();
+        const servicesRaw = String(req.query.services || "[]");
+
+        let servicesParsed = [];
+        try {
+            servicesParsed = JSON.parse(servicesRaw);
+        } catch (e) {
+            return res.status(400).json({ error: "Invalid services format" });
+        }
+
+        const sanitized = sanitizeServices(servicesParsed) || [];
+        const specialsResult = await getApplicableSpecials(email, sanitized, referralEmail);
+        res.json(specialsResult);
+    } catch (err) {
+        return sendInternalError(res, "Preview specials error:", err);
+    }
+});
+
+// Loyalty-free booking: skip Stripe when the Wax Pass makes the appointment complimentary
+app.post("/api/free-booking", async (req, res) => {
+    try {
+        const { date, time, services, customer, consent } = req.body;
+
+        const sanitizedServices = sanitizeServices(services);
+        const customerEmail = String(customer?.email || "").trim();
+        const customerName = String(customer?.name || "").trim();
+        const customerPhone = String(customer?.phone || "").trim();
+        const referralEmail = String(customer?.referralEmail || "").trim();
+        const timezone = String(customer?.timezone || "").trim();
+        const consentAccepted = consent?.accepted === true;
+        const consentSignature = String(consent?.signature || "").trim();
+
+        if (!consentAccepted || consentSignature.length < 2) {
+            return res.status(400).json({ error: "Consent form must be signed" });
+        }
+
+        if (!isValidDate(date) || !isValidTime(time) || !sanitizedServices) {
+            return res.status(400).json({ error: "Missing or invalid fields" });
+        }
+
+        // Re-verify loyalty eligibility server-side
+        const specialsResult = await getApplicableSpecials(customerEmail, sanitizedServices, referralEmail);
+        if (!specialsResult.isFree) {
+            return res.status(400).json({ error: "Free booking not applicable for this account" });
+        }
+
+        const requestedDuration = getServicesTotalDuration(sanitizedServices);
+
+        const conflict = await pool.query(
+            `SELECT id FROM appointments
+             WHERE date = $1 AND status IN ('confirmed','late')
+             AND time < ($2::time + make_interval(mins => $3::int))
+             AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+             LIMIT 1`,
+            [date, time, requestedDuration]
+        );
+        if (conflict.rows.length > 0) {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
+
+        let clientId = null;
+        if (customerEmail) {
+            const cl = await pool.query(
+                "SELECT id FROM clients WHERE LOWER(email) = LOWER($1) LIMIT 1",
+                [customerEmail]
+            );
+            clientId = cl.rows[0]?.id || null;
+        }
+
+        const freeToken = `WAXPASS-FREE-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
+        const specialTypes = JSON.stringify(specialsResult.specials.map((s) => s.type));
+
+        const insertResult = await pool.query(
+            `INSERT INTO appointments
+             (date, time, duration_minutes, services, email, name, phone, price,
+              stripe_payment_id, timezone, client_id, consent_signature,
+              consent_accepted_at, referred_by_email, applied_specials, discount_cents, status)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),$13,$14,$15,'confirmed')
+             RETURNING id`,
+            [
+                date, time, requestedDuration,
+                JSON.stringify(sanitizedServices),
+                customerEmail, customerName, customerPhone,
+                0, freeToken, timezone || null, clientId,
+                consentSignature, referralEmail || null,
+                specialTypes, 0
+            ]
+        );
+
+        const appointmentId = insertResult.rows[0].id;
+
+        res.json({
+            success: true,
+            appointmentId,
+            appointment: {
+                date, time,
+                services: sanitizedServices,
+                email: customerEmail,
+                name: customerName,
+                phone: customerPhone,
+                price: 0,
+                timezone: timezone || null
+            }
+        });
+
+        // Send confirmation email
+        if (customerEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            transporter.sendMail({
+                from: process.env.EMAIL_USER,
+                to: customerEmail,
+                subject: "Booking Confirmation - Lunelia Esthetics",
+                html: `
+                    <h2>Your Booking is Confirmed!</h2>
+                    <p>Hi ${customerName || "Valued Client"},</p>
+                    <p>Thank you for your loyalty! Your Wax Pass reward has been applied — this appointment is on the house.</p>
+                    <p><strong>Date:</strong> ${date}</p>
+                    <p><strong>Time:</strong> ${time}</p>
+                    <p><strong>Services:</strong> ${sanitizedServices.map((s) => s.name).join(", ")}</p>
+                    <p>We look forward to seeing you!</p>
+                    <p>Lunelia Esthetics</p>
+                `
+            }).catch((e) => console.error("Free booking email error:", e));
+        }
+    } catch (err) {
+        return sendInternalError(res, "Free booking error:", err);
     }
 });
 
@@ -810,15 +1168,31 @@ app.post("/api/create-payment-intent", async (req, res) => {
             return res.status(400).json({ error: "Missing or invalid fields" });
         }
 
-        const expectedAmount =
-            sanitizedServices.reduce((sum, service) => sum + service.price, 0) * 100;
         const requestedDuration = getServicesTotalDuration(sanitizedServices);
 
         if (!Number.isInteger(requestedDuration) || requestedDuration <= 0) {
             return res.status(400).json({ error: "Invalid service duration" });
         }
 
-        if (parsedAmount !== expectedAmount) {
+        // Re-verify applicable specials server-side so the client cannot fake discounts
+        const specialsResult = await getApplicableSpecials(customerEmail, sanitizedServices, referralEmail);
+
+        // Compute authoritative expected amount: base prices + overrides - flat discount
+        let expectedAmountCents = sanitizedServices.reduce((sum, svc) => sum + svc.price * 100, 0);
+        for (const svc of sanitizedServices) {
+            const override = specialsResult.priceOverridesCents[svc.id];
+            if (override !== undefined) {
+                expectedAmountCents += override - svc.price * 100;
+            }
+        }
+        expectedAmountCents = Math.max(0, expectedAmountCents - specialsResult.flatDiscountCents);
+
+        if (specialsResult.isFree) {
+            // The loyalty special makes this entirely free — must use /api/free-booking
+            return res.status(400).json({ error: "BOOKING_IS_FREE", free: true });
+        }
+
+        if (parsedAmount !== expectedAmountCents) {
             return res.status(400).json({ error: "Amount does not match services" });
         }
 
@@ -826,8 +1200,8 @@ app.post("/api/create-payment-intent", async (req, res) => {
             `
                 SELECT id
                 FROM appointments
-                WHERE date = $1
-                  AND status = 'confirmed'
+                                WHERE date = $1
+                                    AND status IN ('confirmed', 'late')
                   AND time < ($2::time + make_interval(mins => $3::int))
                   AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
                 LIMIT 1
@@ -855,8 +1229,8 @@ app.post("/api/create-payment-intent", async (req, res) => {
                 }
             ],
             mode: "payment",
-            success_url: `${process.env.DOMAIN || "http://localhost:" + PORT}/success.html?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${process.env.DOMAIN || "http://localhost:" + PORT}/booking.html`,
+            success_url: `${PUBLIC_APP_URL}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${PUBLIC_APP_URL}/booking.html`,
             metadata: {
                 date,
                 time,
@@ -868,7 +1242,12 @@ app.post("/api/create-payment-intent", async (req, res) => {
                 referralEmail,
                 timezone,
                 consentAccepted: String(consentAccepted),
-                consentSignature
+                consentSignature,
+                appliedSpecials: JSON.stringify(specialsResult.specials.map((s) => s.type)),
+                discountCents: String(specialsResult.flatDiscountCents + Object.entries(specialsResult.priceOverridesCents).reduce((sum, [id, overrideCents]) => {
+                    const svc = sanitizedServices.find((s) => s.id === id);
+                    return svc ? sum + (overrideCents - svc.price * 100) : sum;
+                }, 0))
             },
             customer_email: customerEmail || undefined
         });
@@ -917,7 +1296,9 @@ app.post("/api/confirm-booking", async (req, res) => {
             referralEmail,
             timezone,
             consentAccepted,
-            consentSignature
+            consentSignature,
+            appliedSpecials: metaAppliedSpecials,
+            discountCents: metaDiscountCents
         } =
             session.metadata || {};
 
@@ -995,8 +1376,8 @@ app.post("/api/confirm-booking", async (req, res) => {
             `
                 SELECT id
                 FROM appointments
-                WHERE date = $1
-                  AND status = 'confirmed'
+                                WHERE date = $1
+                                    AND status IN ('confirmed', 'late')
                   AND time < ($2::time + make_interval(mins => $3::int))
                   AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
                 LIMIT 1
@@ -1011,7 +1392,7 @@ app.post("/api/confirm-booking", async (req, res) => {
         // Insert appointment
         try {
             const result = await pool.query(
-                "INSERT INTO appointments (date, time, duration_minutes, services, email, name, phone, price, stripe_payment_id, timezone, client_id, consent_signature, consent_accepted_at, referred_by_email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13) RETURNING id",
+                "INSERT INTO appointments (date, time, duration_minutes, services, email, name, phone, price, stripe_payment_id, timezone, client_id, consent_signature, consent_accepted_at, referred_by_email, applied_specials, discount_cents) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13, $14, $15) RETURNING id",
                 [
                     date,
                     time,
@@ -1025,16 +1406,41 @@ app.post("/api/confirm-booking", async (req, res) => {
                     timezone || null,
                     clientId,
                     signedConsentName,
-                    referredByEmail || null
+                    referredByEmail || null,
+                    metaAppliedSpecials || null,
+                    metaDiscountCents ? parseInt(metaDiscountCents, 10) : 0
                 ]
             );
 
             const appointmentId = result.rows[0].id;
 
-            // Send confirmation email
+            // Update payment status
+            await pool.query(
+                "UPDATE payments SET status = $1, stripe_payment_intent_id = $2 WHERE stripe_session_id = $3",
+                ["completed", session.payment_intent, sessionId]
+            );
+
+            const responsePayload = {
+                success: true,
+                appointmentId,
+                appointment: {
+                    date,
+                    time,
+                    services: servicesList,
+                    email: appointmentEmail,
+                    name: appointmentName,
+                    phone: appointmentPhone,
+                    price: session.amount_total,
+                    timezone: timezone || null
+                }
+            };
+
+            res.json(responsePayload);
+
+            // Send confirmation email without blocking the browser success page.
             if (appointmentEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-                try {
-                    await transporter.sendMail({
+                transporter
+                    .sendMail({
                         from: process.env.EMAIL_USER,
                         to: appointmentEmail,
                         subject: "Booking Confirmation - Lunelia Esthetics",
@@ -1057,32 +1463,11 @@ app.post("/api/confirm-booking", async (req, res) => {
                             <p>We look forward to seeing you!</p>
                             <p>Lunelia Esthetics</p>
                         `
+                    })
+                    .catch((emailError) => {
+                        console.error("Email Error:", emailError);
                     });
-                } catch (emailError) {
-                    console.error("Email Error:", emailError);
-                }
             }
-
-            // Update payment status
-            await pool.query(
-                "UPDATE payments SET status = $1, stripe_payment_intent_id = $2 WHERE stripe_session_id = $3",
-                ["completed", session.payment_intent, sessionId]
-            );
-
-            res.json({
-                success: true,
-                appointmentId,
-                appointment: {
-                    date,
-                    time,
-                    services: servicesList,
-                    email: appointmentEmail,
-                    name: appointmentName,
-                    phone: appointmentPhone,
-                    price: session.amount_total,
-                    timezone: timezone || null
-                }
-            });
         } catch (dbErr) {
             console.error("DB Error:", dbErr);
             if (dbErr.code === "23505") {
@@ -1366,9 +1751,24 @@ app.post("/api/client/logout", requireClient, requireCsrf, async (req, res) => {
     return res.json({ success: true });
 });
 
+async function syncClientPastAppointments(email) {
+    await pool.query(
+        `
+            UPDATE appointments
+            SET status = 'completed'
+            WHERE LOWER(email) = LOWER($1)
+              AND status IN ('confirmed', 'late')
+              AND (date + time) < NOW()
+        `,
+        [email]
+    );
+}
+
 app.get("/api/client/appointments", requireClient, async (req, res) => {
     try {
         const email = normalizeEmail(req.clientAuth?.email || "");
+
+        await syncClientPastAppointments(email);
 
         const result = await pool.query(
             `
@@ -1385,7 +1785,9 @@ app.get("/api/client/appointments", requireClient, async (req, res) => {
                     created_at
                 FROM appointments
                 WHERE LOWER(email) = LOWER($1)
-                ORDER BY date DESC, time DESC
+                  AND status IN ('confirmed', 'late')
+                  AND (date + time) >= NOW()
+                ORDER BY date ASC, time ASC
             `,
             [email]
         );
@@ -1393,6 +1795,42 @@ app.get("/api/client/appointments", requireClient, async (req, res) => {
         return res.json(result.rows || []);
     } catch (error) {
         return sendInternalError(res, "Client appointments error:", error);
+    }
+});
+
+app.get("/api/client/appointments/past", requireClient, async (req, res) => {
+    try {
+        const email = normalizeEmail(req.clientAuth?.email || "");
+
+        await syncClientPastAppointments(email);
+
+        const result = await pool.query(
+            `
+                SELECT
+                    id,
+                    TO_CHAR(date, 'YYYY-MM-DD') AS date,
+                    TO_CHAR(time, 'HH24:MI') AS time,
+                    COALESCE(duration_minutes, 30) AS duration_minutes,
+                    services,
+                    status,
+                    price,
+                    cancellation_fee_percent,
+                    no_show_fee_percent,
+                    created_at
+                FROM appointments
+                WHERE LOWER(email) = LOWER($1)
+                  AND (
+                    status IN ('cancelled', 'completed', 'no_show')
+                    OR (date + time) < NOW()
+                  )
+                ORDER BY date DESC, time DESC
+            `,
+            [email]
+        );
+
+        return res.json(result.rows || []);
+    } catch (error) {
+        return sendInternalError(res, "Client past appointments error:", error);
     }
 });
 
@@ -1414,9 +1852,9 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
             `
                 SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
                 FROM appointments
-                WHERE id = $1
-                  AND LOWER(email) = LOWER($2)
-                  AND status = 'confirmed'
+                                WHERE id = $1
+                                    AND LOWER(email) = LOWER($2)
+                                    AND status IN ('confirmed', 'late')
                 LIMIT 1
             `,
             [appointmentId, email]
@@ -1432,9 +1870,9 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
             `
                 SELECT id
                 FROM appointments
-                WHERE id <> $1
-                  AND date = $2
-                  AND status = 'confirmed'
+                                WHERE id <> $1
+                                    AND date = $2
+                                    AND status IN ('confirmed', 'late')
                   AND time < ($3::time + make_interval(mins => $4::int))
                   AND $3::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
                 LIMIT 1
@@ -1478,8 +1916,8 @@ app.post("/api/client/appointments/:id/cancel", requireClient, requireCsrf, asyn
         }
 
         const appointment = result.rows[0];
-        if (appointment.status !== "confirmed") {
-            return res.status(400).json({ error: "Only confirmed appointments can be cancelled" });
+        if (!["confirmed", "late"].includes(String(appointment.status || "").toLowerCase())) {
+            return res.status(400).json({ error: "Only active appointments can be cancelled" });
         }
 
         const appointmentStart = new Date(`${appointment.date}T${appointment.time}:00`);
@@ -1497,7 +1935,7 @@ app.post("/api/client/appointments/:id/cancel", requireClient, requireCsrf, asyn
     }
 });
 
-app.post("/api/admin/appointments/:id/no-show", requireAdmin, async (req, res) => {
+app.post("/api/admin/appointments/:id/no-show", requireAdmin, requireAdminCsrf, async (req, res) => {
     try {
         const appointmentId = Number(req.params.id);
         if (!Number.isInteger(appointmentId)) {
@@ -1505,12 +1943,21 @@ app.post("/api/admin/appointments/:id/no-show", requireAdmin, async (req, res) =
         }
 
         const result = await pool.query(
-            "UPDATE appointments SET status = 'no_show', no_show_fee_percent = 50 WHERE id = $1 RETURNING id",
+            `
+                UPDATE appointments
+                SET status = 'no_show',
+                    no_show_fee_percent = 50,
+                    cancellation_fee_percent = 0,
+                    cancelled_at = NULL
+                WHERE id = $1
+                  AND status IN ('confirmed', 'late')
+                RETURNING id
+            `,
             [appointmentId]
         );
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: "Appointment not found" });
+            return res.status(400).json({ error: "Only active appointments can be marked as no-show" });
         }
 
         return res.json({ success: true, id: result.rows[0].id });
@@ -1519,7 +1966,38 @@ app.post("/api/admin/appointments/:id/no-show", requireAdmin, async (req, res) =
     }
 });
 
-app.post("/api/admin/appointments/:id/reverse-no-show", requireAdmin, async (req, res) => {
+app.post("/api/admin/appointments/:id/late", requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+        const appointmentId = Number(req.params.id);
+        if (!Number.isInteger(appointmentId)) {
+            return res.status(400).json({ error: "Invalid appointment ID" });
+        }
+
+        const result = await pool.query(
+            `
+                UPDATE appointments
+                SET status = 'late',
+                    no_show_fee_percent = 0,
+                    cancellation_fee_percent = 0,
+                    cancelled_at = NULL
+                WHERE id = $1
+                  AND status = 'confirmed'
+                RETURNING id
+            `,
+            [appointmentId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(400).json({ error: "Only confirmed appointments can be marked as late" });
+        }
+
+        return res.json({ success: true, id: result.rows[0].id });
+    } catch (error) {
+        return sendInternalError(res, "Admin late error:", error);
+    }
+});
+
+app.post("/api/admin/appointments/:id/reverse-no-show", requireAdmin, requireAdminCsrf, async (req, res) => {
     try {
         const appointmentId = Number(req.params.id);
         if (!Number.isInteger(appointmentId)) {
@@ -1548,7 +2026,75 @@ app.post("/api/admin/appointments/:id/reverse-no-show", requireAdmin, async (req
     }
 });
 
-app.post("/api/admin/expenses", requireAdmin, async (req, res) => {
+app.post("/api/admin/appointments/:id/reschedule", requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+        const appointmentId = Number(req.params.id);
+        const { date, time } = req.body || {};
+
+        if (!Number.isInteger(appointmentId)) {
+            return res.status(400).json({ error: "Invalid appointment ID" });
+        }
+
+        if (!isValidDate(date) || !isValidTime(time)) {
+            return res.status(400).json({ error: "Valid date and time are required" });
+        }
+
+        const existing = await pool.query(
+            `
+                SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
+                FROM appointments
+                WHERE id = $1
+                  AND status IN ('confirmed', 'late')
+                LIMIT 1
+            `,
+            [appointmentId]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+
+        const duration = Number(existing.rows[0].duration_minutes) || 30;
+
+        const overlap = await pool.query(
+            `
+                SELECT id
+                FROM appointments
+                WHERE id <> $1
+                  AND date = $2
+                  AND status IN ('confirmed', 'late')
+                  AND time < ($3::time + make_interval(mins => $4::int))
+                  AND $3::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                LIMIT 1
+            `,
+            [appointmentId, date, time, duration]
+        );
+
+        if (overlap.rows.length > 0) {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
+
+        await pool.query(
+            `
+                UPDATE appointments
+                SET date = $1,
+                    time = $2,
+                    status = 'confirmed',
+                    cancelled_at = NULL,
+                    cancellation_fee_percent = 0,
+                    no_show_fee_percent = 0
+                WHERE id = $3
+            `,
+            [date, time, appointmentId]
+        );
+
+        return res.json({ success: true, date, time });
+    } catch (error) {
+        return sendInternalError(res, "Admin reschedule error:", error);
+    }
+});
+
+app.post("/api/admin/expenses", requireAdmin, requireAdminCsrf, async (req, res) => {
     try {
         const expenseDate = String(req.body?.date || "");
         const category = String(req.body?.category || "").trim();
@@ -1581,6 +2127,33 @@ app.post("/api/admin/expenses", requireAdmin, async (req, res) => {
         return res.json({ success: true, expense: result.rows[0] });
     } catch (error) {
         return sendInternalError(res, "Admin expense create error:", error);
+    }
+});
+
+app.delete("/api/admin/expenses/:id", requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+        const expenseId = Number(req.params.id);
+
+        if (!Number.isInteger(expenseId)) {
+            return res.status(400).json({ error: "Invalid expense ID" });
+        }
+
+        const result = await pool.query(
+            `
+                DELETE FROM expenses
+                WHERE id = $1
+                RETURNING id
+            `,
+            [expenseId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "Expense not found" });
+        }
+
+        return res.json({ success: true, id: result.rows[0].id });
+    } catch (error) {
+        return sendInternalError(res, "Admin expense delete error:", error);
     }
 });
 
@@ -1636,7 +2209,7 @@ app.get("/api/admin/finance", requireAdmin, async (req, res) => {
             const price = Number(appointment.price) || 0;
             const status = String(appointment.status || "").toLowerCase();
 
-            if (status === "confirmed") {
+            if (status === "confirmed" || status === "late") {
                 confirmedRevenueCents += price;
             }
 
@@ -1814,7 +2387,7 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
 app.get("/api/admin/appointments", requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT id, TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, services, email, name, phone, price, timezone, status, created_at FROM appointments ORDER BY created_at DESC"
+            "SELECT id, TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes, services, email, name, phone, price, timezone, status, created_at FROM appointments ORDER BY created_at DESC"
         );
         res.json(result.rows || []);
     } catch (err) {
@@ -1823,16 +2396,29 @@ app.get("/api/admin/appointments", requireAdmin, async (req, res) => {
     }
 });
 
-app.post("/api/admin/appointments/:id/cancel", requireAdmin, async (req, res) => {
+app.post("/api/admin/appointments/:id/cancel", requireAdmin, requireAdminCsrf, async (req, res) => {
     try {
-        const { id } = req.params;
+        const appointmentId = Number(req.params.id);
+        if (!Number.isInteger(appointmentId)) {
+            return res.status(400).json({ error: "Invalid appointment ID" });
+        }
+
         const result = await pool.query(
-            "UPDATE appointments SET status = 'cancelled' WHERE id = $1 RETURNING id",
-            [id]
+            `
+                UPDATE appointments
+                SET status = 'cancelled',
+                    cancelled_at = NOW(),
+                    cancellation_fee_percent = 0,
+                    no_show_fee_percent = 0
+                WHERE id = $1
+                  AND status IN ('confirmed', 'late')
+                RETURNING id
+            `,
+            [appointmentId]
         );
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: "Appointment not found" });
+            return res.status(400).json({ error: "Only active appointments can be cancelled" });
         }
 
         res.json({ success: true, id: result.rows[0].id });

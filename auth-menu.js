@@ -1,5 +1,5 @@
 (function updateMenuForClientSession() {
-    const apiBase = window.location.port === "5500" ? "http://localhost:3000" : "";
+    const apiBase = window.location.port === "3001" ? "http://localhost:3001" : "";
 
     fetch(`${apiBase}/api/client/session`, {
         method: "GET",

@@ -65,67 +65,7 @@
     </section>
 </main>
 
-<script>
-    window.addEventListener('load', async () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const sessionId = urlParams.get('session_id');
-        
-        const loadingDiv = document.getElementById('loading');
-        const successDiv = document.getElementById('success');
-        const errorDiv = document.getElementById('error');
-        const errorMessage = document.getElementById('error-message');
-        const appointmentName = document.getElementById('appointment-name');
-        const appointmentDate = document.getElementById('appointment-date');
-        const appointmentTime = document.getElementById('appointment-time');
-        const appointmentServices = document.getElementById('appointment-services');
-        
-        if (!sessionId) {
-            loadingDiv.style.display = 'none';
-            errorDiv.style.display = 'block';
-            errorMessage.textContent = 'No session found. Please try booking again.';
-            return;
-        }
-        
-        try {
-            // Confirm booking
-            const response = await fetch('/api/confirm-booking', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionId })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Booking confirmation failed');
-            }
-
-            if (data.appointment) {
-                appointmentName.textContent = data.appointment.name || 'Client';
-                appointmentDate.textContent = data.appointment.date || '-';
-                appointmentTime.textContent = data.appointment.time || '-';
-                appointmentServices.textContent = (data.appointment.services || [])
-                    .map(service => service.name)
-                    .join(', ') || '-';
-            }
-
-            // Clear localStorage
-            localStorage.removeItem('cart');
-            localStorage.removeItem('total');
-            localStorage.removeItem('pendingBookingDraft');
-
-            // Show success
-            loadingDiv.style.display = 'none';
-            successDiv.style.display = 'block';
-        } catch (error) {
-            console.error('Error:', error);
-            loadingDiv.style.display = 'none';
-            errorDiv.style.display = 'block';
-            errorMessage.textContent = error.message;
-        }
-    });
-</script>
-
+<script src="success.js"></script>
 <script src="auth-menu.js"></script>
 
 </body>

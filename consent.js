@@ -52,6 +52,39 @@ form?.addEventListener("submit", async (event) => {
     submitButton.textContent = "Processing...";
     submitButton.setAttribute("aria-busy", "true");
 
+    // --- Free booking (loyalty Wax Pass) path ---
+    if (pendingBooking.isFree) {
+        try {
+            const response = await fetch("/api/free-booking", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    date: pendingBooking.date,
+                    time: pendingBooking.time,
+                    services: pendingBooking.services,
+                    customer: pendingBooking.customer,
+                    consent: { accepted: true, signature }
+                })
+            });
+
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(data?.error || "Free booking failed");
+            }
+
+            // Store the result so success.html can read it
+            localStorage.setItem("freeBookingResult", JSON.stringify(data));
+            window.location.href = "success.html?free=1";
+        } catch (error) {
+            setMessage(error.message || "Unable to complete free booking.");
+            submitButton.disabled = false;
+            submitButton.textContent = "Confirm Free Booking";
+            submitButton.removeAttribute("aria-busy");
+        }
+        return;
+    }
+
+    // --- Standard Stripe payment path ---
     try {
         if (!stripe) {
             await initStripe();
@@ -97,6 +130,14 @@ form?.addEventListener("submit", async (event) => {
         if (submitButton) {
             submitButton.disabled = true;
         }
+        return;
+    }
+
+    if (pendingBooking.isFree) {
+        if (submitButton) {
+            submitButton.textContent = "Confirm Free Booking";
+        }
+        // No Stripe needed for free bookings
         return;
     }
 

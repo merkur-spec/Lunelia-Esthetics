@@ -48,6 +48,7 @@
         <section class="calendar-booking">
             <h3>Appointments</h3>
             <p id="dashboard-message" class="form-message admin-dashboard-message" role="status" aria-live="polite"></p>
+            <button id="admin-logout" type="button" class="cart-remove-btn admin-logout-btn">Sign Out</button>
             <div class="table-wrapper admin-table-wrapper">
                 <table id="appointments-table" class="admin-table">
                     <caption>Booked appointments</caption>
@@ -65,6 +66,26 @@
                     </thead>
                     <tbody></tbody>
                 </table>
+            </div>
+
+            <div id="admin-reschedule-panel" class="client-reschedule-panel admin-reschedule-panel" hidden>
+                <h4>Reschedule Appointment</h4>
+                <p id="admin-reschedule-target" class="client-reschedule-target"></p>
+                <div class="field-group">
+                    <label for="admin-reschedule-date">Pick a New Date</label>
+                    <input type="date" id="admin-reschedule-date">
+                </div>
+                <div class="time-wrapper">
+                    <label>Available Time Slots:</label>
+                    <table class="time-slots-table" aria-label="Available admin reschedule times">
+                        <tbody id="admin-reschedule-slots" class="time-slots"></tbody>
+                    </table>
+                </div>
+                <p id="admin-reschedule-message" class="form-message" role="status" aria-live="polite"></p>
+                <div class="client-reschedule-actions">
+                    <button id="admin-reschedule-save" type="button" disabled>Confirm Reschedule</button>
+                    <button id="admin-reschedule-cancel" type="button">Cancel</button>
+                </div>
             </div>
         </section>
 
@@ -205,6 +226,7 @@
                             <th scope="col">Category</th>
                             <th scope="col">Description</th>
                             <th scope="col">Amount</th>
+                            <th scope="col">Action</th>
                         </tr>
                     </thead>
                     <tbody></tbody>

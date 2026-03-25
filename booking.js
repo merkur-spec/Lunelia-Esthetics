@@ -19,10 +19,54 @@ let selectedDate = null;
 let selectedTime = null;
 let cart = [];
 let total = 0;
+let appliedSpecials = null; // result from /api/booking/preview-specials
 
 function persistCartState() {
     localStorage.setItem("cart", JSON.stringify(cart));
     localStorage.setItem("total", String(total));
+}
+
+/** Recomputes `total` from cart base prices + any active specials. */
+function recomputeTotal() {
+    let base = cart.reduce((sum, item) => sum + Number(item.price || 0), 0);
+    if (appliedSpecials) {
+        const overrides = appliedSpecials.priceOverridesCents || {};
+        for (const item of cart) {
+            if (overrides[item.id] !== undefined) {
+                base -= Number(item.price || 0);
+                base += overrides[item.id] / 100;
+            }
+        }
+        base = Math.max(0, base - (appliedSpecials.flatDiscountCents || 0) / 100);
+        if (appliedSpecials.isFree) base = 0;
+    }
+    total = Math.round(base);
+    persistCartState();
+}
+
+/** Fetches applicable specials from the server and re-renders the cart. */
+async function fetchAndApplySpecials() {
+    const email = emailInput?.value?.trim() || "";
+    const referralEmail = referralEmailInput?.value?.trim() || "";
+
+    if (!email || cart.length === 0) {
+        appliedSpecials = null;
+        renderCheckoutCart();
+        return;
+    }
+
+    try {
+        const params = new URLSearchParams({
+            email,
+            referralEmail,
+            services: JSON.stringify(cart)
+        });
+        const response = await fetch(`/api/booking/preview-specials?${params}`);
+        appliedSpecials = response.ok ? await response.json() : null;
+    } catch (e) {
+        appliedSpecials = null;
+    }
+    renderCheckoutCart();
 }
 
 function renderCheckoutCart() {
@@ -31,8 +75,17 @@ function renderCheckoutCart() {
     cart.forEach((item, index) => {
         const li = document.createElement("li");
 
+        // Show overridden price for this item if a special applies
+        const overrideCents = appliedSpecials?.priceOverridesCents?.[item.id];
+        const displayPrice = overrideCents !== undefined ? (overrideCents / 100).toFixed(0) : item.price;
+        const priceHasChanged = overrideCents !== undefined && overrideCents !== item.price * 100;
+
         const itemText = document.createElement("span");
-        itemText.textContent = `${item.name} - $${item.price}`;
+        if (priceHasChanged) {
+            itemText.innerHTML = `${item.name} - <s>$${item.price}</s> <strong>$${displayPrice}</strong>`;
+        } else {
+            itemText.textContent = `${item.name} - $${displayPrice}`;
+        }
 
         const removeButton = document.createElement("button");
         removeButton.type = "button";
@@ -46,7 +99,33 @@ function renderCheckoutCart() {
         cartItemsContainer.appendChild(li);
     });
 
+    // Show applied specials
+    const specialsBox = document.getElementById("specials-applied");
+    const specialsList = document.getElementById("specials-applied-list");
+    if (specialsBox && specialsList) {
+        const specials = appliedSpecials?.specials || [];
+        if (specials.length > 0) {
+            specialsList.innerHTML = "";
+            specials.forEach((s) => {
+                const li = document.createElement("li");
+                li.textContent = s.label;
+                specialsList.appendChild(li);
+            });
+            specialsBox.style.display = "block";
+        } else {
+            specialsBox.style.display = "none";
+        }
+    }
+
+    recomputeTotal();
     totalSpan.textContent = String(total);
+
+    // Update pay button label for free bookings
+    if (payBtn) {
+        payBtn.textContent = appliedSpecials?.isFree
+            ? "Confirm Free Booking"
+            : "Pay & Confirm Booking";
+    }
 }
 
 function removeFromCheckoutCart(index) {
@@ -55,9 +134,8 @@ function removeFromCheckoutCart(index) {
         return;
     }
 
-    total = Math.max(0, total - Number(removedItem.price || 0));
+    // recomputeTotal() will be called inside renderCheckoutCart()
     renderCheckoutCart();
-    persistCartState();
 
     if (formMessage) {
         formMessage.textContent = "Removed from cart.";
@@ -149,15 +227,17 @@ function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15) {
 function loadCart() {
     localStorage.removeItem(PENDING_BOOKING_KEY);
     const savedCart = localStorage.getItem("cart");
-    const savedTotal = localStorage.getItem("total");
-    
+
     if (savedCart) {
-        cart = JSON.parse(savedCart);
-        total = parseInt(savedTotal) || 0;
+        try {
+            cart = JSON.parse(savedCart);
+        } catch (e) {
+            cart = [];
+        }
     }
 
     renderCheckoutCart();
-    
+
     if (cart.length === 0) {
         if (formMessage) {
             formMessage.textContent = "Your cart is empty. Please return to Home to add services.";
@@ -165,6 +245,12 @@ function loadCart() {
         payBtn.disabled = true;
         timeSlotsContainer.innerHTML = "";
         bookingDetailsDiv.style.display = "none";
+    } else {
+        // Fetch specials if email is already filled (e.g. back-navigation)
+        const prefilledEmail = emailInput?.value?.trim() || "";
+        if (prefilledEmail) {
+            fetchAndApplySpecials();
+        }
     }
 }
 
@@ -283,6 +369,10 @@ bookingForm.addEventListener("input", () => {
     updatePayButtonState();
 });
 
+// Re-fetch specials when the user finishes typing their email or referral email
+emailInput?.addEventListener("blur", () => { fetchAndApplySpecials(); });
+referralEmailInput?.addEventListener("blur", () => { fetchAndApplySpecials(); });
+
 // Payment button
 payBtn.addEventListener("click", async () => {
     if (cart.length === 0) {
@@ -313,12 +403,17 @@ payBtn.addEventListener("click", async () => {
         }
         return;
     }
-    
+
     payBtn.disabled = true;
     payBtn.textContent = "Continuing...";
     payBtn.setAttribute("aria-busy", "true");
-    
+
     try {
+        // Re-fetch specials one final time before storing (in case form was updated)
+        if (emailInput.value.trim()) {
+            await fetchAndApplySpecials();
+        }
+
         localStorage.setItem(
             PENDING_BOOKING_KEY,
             JSON.stringify({
@@ -326,6 +421,8 @@ payBtn.addEventListener("click", async () => {
                 date: selectedDate,
                 time: selectedTime,
                 services: cart,
+                isFree: appliedSpecials?.isFree || false,
+                appliedSpecials: appliedSpecials || null,
                 customer: {
                     name: nameInput.value.trim(),
                     email: emailInput.value.trim(),
@@ -343,7 +440,7 @@ payBtn.addEventListener("click", async () => {
             formMessage.textContent = `Error: ${error.message}`;
         }
         payBtn.disabled = false;
-        payBtn.textContent = "Pay & Confirm Booking";
+        payBtn.textContent = appliedSpecials?.isFree ? "Confirm Free Booking" : "Pay & Confirm Booking";
         payBtn.removeAttribute("aria-busy");
     }
 });
