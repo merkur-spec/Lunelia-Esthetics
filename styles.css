@@ -1081,23 +1081,29 @@ table {
     font-size: 12px;
 }
 
-#appointments-table td:nth-child(6) {
+#appointments-table td:nth-child(6),
+#past-appointments-table td:nth-child(6) {
     min-width: 0;
 }
 
-#appointments-table {
+#appointments-table,
+#past-appointments-table {
     min-width: 0;
     width: 100%;
     table-layout: fixed;
 }
 
 #appointments-table td,
-#appointments-table th {
+#appointments-table th,
+#past-appointments-table td,
+#past-appointments-table th {
     word-break: break-word;
 }
 
 #appointments-table td:last-child,
-#appointments-table th:last-child {
+#appointments-table th:last-child,
+#past-appointments-table td:last-child,
+#past-appointments-table th:last-child {
     width: 110px;
 }
 
@@ -1566,6 +1572,7 @@ footer {
     }
 
     .admin-page #appointments-table,
+    .admin-page #past-appointments-table,
     .admin-page #analytics-daily-table,
     .admin-page #analytics-services-table,
     .admin-page #expenses-table {
@@ -1605,14 +1612,22 @@ footer {
         word-break: break-word;
     }
 
-    .admin-page #appointments-table td:nth-child(1)::before { content: "Date: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(2)::before { content: "Time: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(3)::before { content: "Name: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(4)::before { content: "Email: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(5)::before { content: "Phone: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(6)::before { content: "Services: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(7)::before { content: "Status: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(8)::before { content: "Action: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(1)::before,
+    .admin-page #past-appointments-table td:nth-child(1)::before { content: "Date: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(2)::before,
+    .admin-page #past-appointments-table td:nth-child(2)::before { content: "Time: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(3)::before,
+    .admin-page #past-appointments-table td:nth-child(3)::before { content: "Name: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(4)::before,
+    .admin-page #past-appointments-table td:nth-child(4)::before { content: "Email: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(5)::before,
+    .admin-page #past-appointments-table td:nth-child(5)::before { content: "Phone: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(6)::before,
+    .admin-page #past-appointments-table td:nth-child(6)::before { content: "Services: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(7)::before,
+    .admin-page #past-appointments-table td:nth-child(7)::before { content: "Status: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(8)::before,
+    .admin-page #past-appointments-table td:nth-child(8)::before { content: "Action: "; font-weight: 600; color: #466551; }
 
     .admin-page #analytics-daily-table td:nth-child(1)::before { content: "Date: "; font-weight: 600; color: #466551; }
     .admin-page #analytics-daily-table td:nth-child(2)::before { content: "Appointments: "; font-weight: 600; color: #466551; }
@@ -1630,7 +1645,8 @@ footer {
     .admin-page #expenses-table td:nth-child(4)::before { content: "Amount: "; font-weight: 600; color: #466551; }
     .admin-page #expenses-table td:nth-child(5)::before { content: "Action: "; font-weight: 600; color: #466551; }
 
-    .admin-page #appointments-table td:last-child {
+    .admin-page #appointments-table td:last-child,
+    .admin-page #past-appointments-table td:last-child {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
@@ -1638,7 +1654,8 @@ footer {
         padding-top: 10px;
     }
 
-    .admin-page #appointments-table td:last-child::before {
+    .admin-page #appointments-table td:last-child::before,
+    .admin-page #past-appointments-table td:last-child::before {
         content: "";
     }
 
@@ -1768,14 +1785,22 @@ footer {
         word-break: break-word;
     }
 
-    .admin-page #appointments-table td:nth-child(1)::before { content: "Date: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(2)::before { content: "Time: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(3)::before { content: "Name: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(4)::before { content: "Email: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(5)::before { content: "Phone: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(6)::before { content: "Services: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(7)::before { content: "Status: "; font-weight: 600; color: #466551; }
-    .admin-page #appointments-table td:nth-child(8)::before { content: "Action: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(1)::before,
+    .admin-page #past-appointments-table td:nth-child(1)::before { content: "Date: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(2)::before,
+    .admin-page #past-appointments-table td:nth-child(2)::before { content: "Time: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(3)::before,
+    .admin-page #past-appointments-table td:nth-child(3)::before { content: "Name: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(4)::before,
+    .admin-page #past-appointments-table td:nth-child(4)::before { content: "Email: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(5)::before,
+    .admin-page #past-appointments-table td:nth-child(5)::before { content: "Phone: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(6)::before,
+    .admin-page #past-appointments-table td:nth-child(6)::before { content: "Services: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(7)::before,
+    .admin-page #past-appointments-table td:nth-child(7)::before { content: "Status: "; font-weight: 600; color: #466551; }
+    .admin-page #appointments-table td:nth-child(8)::before,
+    .admin-page #past-appointments-table td:nth-child(8)::before { content: "Action: "; font-weight: 600; color: #466551; }
 
     .admin-page #analytics-daily-table td:nth-child(1)::before { content: "Date: "; font-weight: 600; color: #466551; }
     .admin-page #analytics-daily-table td:nth-child(2)::before { content: "Appointments: "; font-weight: 600; color: #466551; }
@@ -1793,6 +1818,7 @@ footer {
     .admin-page #expenses-table td:nth-child(4)::before { content: "Amount: "; font-weight: 600; color: #466551; }
 
     .admin-page #appointments-table td:last-child,
+    .admin-page #past-appointments-table td:last-child,
     .admin-page #client-appointments-table td:last-child {
         display: flex;
         flex-wrap: wrap;
@@ -1801,7 +1827,8 @@ footer {
         padding-top: 10px;
     }
 
-    .admin-page #appointments-table td:last-child::before {
+    .admin-page #appointments-table td:last-child::before,
+    .admin-page #past-appointments-table td:last-child::before {
         content: "";
     }
 

@@ -7,6 +7,7 @@ const dashboardSection = document.getElementById("admin-dashboard");
 const adminMessage = document.getElementById("admin-message");
 const dashboardMessage = document.getElementById("dashboard-message");
 const appointmentsTableBody = document.querySelector("#appointments-table tbody");
+const pastAppointmentsTableBody = document.querySelector("#past-appointments-table tbody");
 const reportsSection = document.getElementById("admin-reports");
 const financeSection = document.getElementById("admin-finance");
 const analyticsFilterForm = document.getElementById("analytics-filter");
@@ -534,6 +535,41 @@ function getAdminActionOptions(status) {
     return [];
 }
 
+function parseAppointmentDateTime(appointment) {
+    const dateText = String(appointment?.date || "").trim();
+    const timeText = String(appointment?.time || "").trim();
+
+    if (!dateText || !timeText) {
+        return null;
+    }
+
+    const parsed = new Date(`${dateText}T${timeText}:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed;
+}
+
+function isUpcomingAppointment(appointment) {
+    const status = String(appointment?.status || "").toLowerCase();
+    if (status !== "confirmed" && status !== "late") {
+        return false;
+    }
+
+    const appointmentDateTime = parseAppointmentDateTime(appointment);
+    if (!appointmentDateTime) {
+        return false;
+    }
+
+    return appointmentDateTime.getTime() >= Date.now();
+}
+
+function getAppointmentTimestamp(appointment) {
+    const appointmentDateTime = parseAppointmentDateTime(appointment);
+    return appointmentDateTime ? appointmentDateTime.getTime() : null;
+}
+
 async function performAdminAppointmentAction(appointment, action) {
     switch (action) {
         case "reschedule":
@@ -548,18 +584,39 @@ async function performAdminAppointmentAction(appointment, action) {
                 return;
             }
 
-            await fetchAdminJson(`/api/admin/appointments/${appointment.id}/cancel`, {
+            const cancelResult = await fetchAdminJson(`/api/admin/appointments/${appointment.id}/cancel`, {
                 method: "POST"
             });
-            setAdminMessage("Appointment cancelled.");
+
+            const cancelFeePercent = Number(cancelResult?.feePercent) || 0;
+            const cancelRefundedCents = Number(cancelResult?.settlement?.refundedCents) || 0;
+            const cancelKeptCents = Number(cancelResult?.settlement?.keptCents) || 0;
+
+            if (cancelFeePercent > 0) {
+                setAdminMessage(
+                    `Appointment cancelled. ${cancelFeePercent}% fee kept (${formatCurrency(cancelKeptCents)}), refunded ${formatCurrency(cancelRefundedCents)}.`
+                );
+            } else {
+                setAdminMessage(
+                    `Appointment cancelled. Refunded ${formatCurrency(cancelRefundedCents)}.`
+                );
+            }
             break;
         }
-        case "no_show":
-            await fetchAdminJson(`/api/admin/appointments/${appointment.id}/no-show`, {
+        case "no_show": {
+            const noShowResult = await fetchAdminJson(`/api/admin/appointments/${appointment.id}/no-show`, {
                 method: "POST"
             });
-            setAdminMessage("Appointment marked as no-show.");
+
+            const noShowFeePercent = Number(noShowResult?.feePercent) || 50;
+            const noShowRefundedCents = Number(noShowResult?.settlement?.refundedCents) || 0;
+            const noShowKeptCents = Number(noShowResult?.settlement?.keptCents) || 0;
+
+            setAdminMessage(
+                `Appointment marked as no-show. ${noShowFeePercent}% fee kept (${formatCurrency(noShowKeptCents)}), refunded ${formatCurrency(noShowRefundedCents)}.`
+            );
             break;
+        }
         case "late":
             await fetchAdminJson(`/api/admin/appointments/${appointment.id}/late`, {
                 method: "POST"
@@ -575,19 +632,81 @@ async function performAdminAppointmentAction(appointment, action) {
 
 function renderAppointments(appointments) {
     appointmentsTableBody.innerHTML = "";
+    if (pastAppointmentsTableBody) {
+        pastAppointmentsTableBody.innerHTML = "";
+    }
+
     closeAdminReschedulePanel();
 
     if (!appointments || appointments.length === 0) {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
         cell.colSpan = 8;
-        cell.textContent = "No appointments found.";
+        cell.textContent = "No upcoming appointments found.";
         row.appendChild(cell);
         appointmentsTableBody.appendChild(row);
+
+        if (pastAppointmentsTableBody) {
+            const pastRow = document.createElement("tr");
+            const pastCell = document.createElement("td");
+            pastCell.colSpan = 8;
+            pastCell.textContent = "No past appointments found.";
+            pastRow.appendChild(pastCell);
+            pastAppointmentsTableBody.appendChild(pastRow);
+        }
         return;
     }
 
-    appointments.forEach((appointment) => {
+    const upcomingAppointments = appointments.filter((appointment) =>
+        isUpcomingAppointment(appointment)
+    );
+    const pastAppointments = appointments.filter(
+        (appointment) => !isUpcomingAppointment(appointment)
+    );
+
+    upcomingAppointments.sort((left, right) => {
+        const leftTimestamp = getAppointmentTimestamp(left);
+        const rightTimestamp = getAppointmentTimestamp(right);
+
+        if (leftTimestamp === null && rightTimestamp === null) {
+            return Number(left.id) - Number(right.id);
+        }
+
+        if (leftTimestamp === null) {
+            return 1;
+        }
+
+        if (rightTimestamp === null) {
+            return -1;
+        }
+
+        return leftTimestamp - rightTimestamp;
+    });
+
+    pastAppointments.sort((left, right) => {
+        const leftTimestamp = getAppointmentTimestamp(left);
+        const rightTimestamp = getAppointmentTimestamp(right);
+
+        if (leftTimestamp === null && rightTimestamp === null) {
+            return Number(right.id) - Number(left.id);
+        }
+
+        if (leftTimestamp === null) {
+            return 1;
+        }
+
+        if (rightTimestamp === null) {
+            return -1;
+        }
+
+        return rightTimestamp - leftTimestamp;
+    });
+
+    const renderAppointmentRow = (appointment, targetTableBody) => {
+        if (!targetTableBody) {
+            return;
+        }
+
         const row = document.createElement("tr");
         const services = (() => {
             try {
@@ -662,8 +781,30 @@ function renderAppointments(appointments) {
         controls.appendChild(actionSelect);
         controls.appendChild(confirmButton);
         actionCell.appendChild(controls);
+        targetTableBody.appendChild(row);
+    };
+
+    if (upcomingAppointments.length === 0) {
+        const row = document.createElement("tr");
+        row.innerHTML = '<td colspan="8">No upcoming appointments found.</td>';
         appointmentsTableBody.appendChild(row);
-    });
+    } else {
+        upcomingAppointments.forEach((appointment) => {
+            renderAppointmentRow(appointment, appointmentsTableBody);
+        });
+    }
+
+    if (pastAppointmentsTableBody) {
+        if (pastAppointments.length === 0) {
+            const row = document.createElement("tr");
+            row.innerHTML = '<td colspan="8">No past appointments found.</td>';
+            pastAppointmentsTableBody.appendChild(row);
+        } else {
+            pastAppointments.forEach((appointment) => {
+                renderAppointmentRow(appointment, pastAppointmentsTableBody);
+            });
+        }
+    }
 }
 
 function renderFinance(finance) {

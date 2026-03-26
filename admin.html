@@ -49,9 +49,31 @@
             <h3>Appointments</h3>
             <p id="dashboard-message" class="form-message admin-dashboard-message" role="status" aria-live="polite"></p>
             <button id="admin-logout" type="button" class="cart-remove-btn admin-logout-btn">Sign Out</button>
+
+            <h4>Upcoming Appointments</h4>
             <div class="table-wrapper admin-table-wrapper">
                 <table id="appointments-table" class="admin-table">
-                    <caption>Booked appointments</caption>
+                    <caption>Upcoming booked appointments</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Time</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Phone</th>
+                            <th scope="col">Services</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <h4>Past Appointments</h4>
+            <div class="table-wrapper admin-table-wrapper">
+                <table id="past-appointments-table" class="admin-table">
+                    <caption>Past appointment history</caption>
                     <thead>
                         <tr>
                             <th scope="col">Date</th>

@@ -415,6 +415,92 @@ function resolveAnalyticsRange(startRaw, endRaw) {
     return { start, end, days };
 }
 
+function clampFeePercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+
+    return Math.min(100, Math.max(0, Math.round(numeric)));
+}
+
+function calculateLateCancellationFeePercent(dateText, timeText) {
+    const appointmentStart = new Date(`${dateText}T${timeText}:00`);
+    const hoursUntil = (appointmentStart.getTime() - Date.now()) / (1000 * 60 * 60);
+    return hoursUntil < 24 ? 30 : 0;
+}
+
+async function settleAppointmentPolicyWithStripe(appointment, feePercent, reason) {
+    const safeFeePercent = clampFeePercent(feePercent);
+    const appointmentId = Number(appointment?.id);
+    const stripePaymentIntentId = String(appointment?.stripe_payment_id || "").trim();
+    const priceCents = Math.max(0, Number(appointment?.price) || 0);
+
+    const baseSettlement = {
+        feePercent: safeFeePercent,
+        keptCents: Math.round(priceCents * (safeFeePercent / 100)),
+        refundedCents: 0,
+        hasStripePayment: Boolean(stripePaymentIntentId)
+    };
+
+    if (!stripePaymentIntentId || priceCents <= 0) {
+        return baseSettlement;
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
+        expand: ["charges.data.refunds"]
+    });
+
+    const capturedCents = Math.max(
+        0,
+        Number(paymentIntent.amount_received || paymentIntent.amount || 0)
+    );
+
+    if (capturedCents <= 0) {
+        return {
+            ...baseSettlement,
+            keptCents: 0
+        };
+    }
+
+    const totalRefundedCents = (paymentIntent.charges?.data || []).reduce((sum, charge) => {
+        return sum + Math.max(0, Number(charge?.amount_refunded) || 0);
+    }, 0);
+
+    const targetKeptCents = Math.min(
+        capturedCents,
+        Math.round(capturedCents * (safeFeePercent / 100))
+    );
+    const targetRefundedCents = Math.max(0, capturedCents - targetKeptCents);
+    const additionalRefundCents = Math.max(0, targetRefundedCents - totalRefundedCents);
+
+    if (additionalRefundCents > 0) {
+        await stripe.refunds.create(
+            {
+                payment_intent: stripePaymentIntentId,
+                amount: additionalRefundCents,
+                reason: "requested_by_customer",
+                metadata: {
+                    appointment_id: String(appointmentId || ""),
+                    policy_reason: String(reason || "policy")
+                }
+            },
+            {
+                idempotencyKey: `policy_refund_${appointmentId || "unknown"}_${safeFeePercent}_${targetRefundedCents}`
+            }
+        );
+    }
+
+    const finalRefundedCents = totalRefundedCents + additionalRefundCents;
+
+    return {
+        feePercent: safeFeePercent,
+        keptCents: Math.max(0, capturedCents - finalRefundedCents),
+        refundedCents: additionalRefundCents,
+        hasStripePayment: true
+    };
+}
+
 function normalizeServiceName(value) {
     return String(value || "")
         .toLowerCase()
@@ -1902,7 +1988,7 @@ app.post("/api/client/appointments/:id/cancel", requireClient, requireCsrf, asyn
 
         const result = await pool.query(
             `
-                SELECT id, date::text AS date, TO_CHAR(time, 'HH24:MI') AS time, status
+                                SELECT id, date::text AS date, TO_CHAR(time, 'HH24:MI') AS time, status, price, stripe_payment_id
                 FROM appointments
                 WHERE id = $1
                   AND LOWER(email) = LOWER($2)
@@ -1920,16 +2006,19 @@ app.post("/api/client/appointments/:id/cancel", requireClient, requireCsrf, asyn
             return res.status(400).json({ error: "Only active appointments can be cancelled" });
         }
 
-        const appointmentStart = new Date(`${appointment.date}T${appointment.time}:00`);
-        const hoursUntil = (appointmentStart.getTime() - Date.now()) / (1000 * 60 * 60);
-        const feePercent = hoursUntil < 24 ? 30 : 0;
+        const feePercent = calculateLateCancellationFeePercent(appointment.date, appointment.time);
+        const settlement = await settleAppointmentPolicyWithStripe(
+            appointment,
+            feePercent,
+            "client_cancel"
+        );
 
         await pool.query(
-            "UPDATE appointments SET status = 'cancelled', cancelled_at = NOW(), cancellation_fee_percent = $1 WHERE id = $2",
+            "UPDATE appointments SET status = 'cancelled', cancelled_at = NOW(), cancellation_fee_percent = $1, no_show_fee_percent = 0 WHERE id = $2",
             [feePercent, appointmentId]
         );
 
-        return res.json({ success: true, feePercent });
+        return res.json({ success: true, feePercent, settlement });
     } catch (error) {
         return sendInternalError(res, "Client cancel error:", error);
     }
@@ -1941,6 +2030,31 @@ app.post("/api/admin/appointments/:id/no-show", requireAdmin, requireAdminCsrf, 
         if (!Number.isInteger(appointmentId)) {
             return res.status(400).json({ error: "Invalid appointment ID" });
         }
+
+        const existing = await pool.query(
+            `
+                SELECT id, status, price, stripe_payment_id
+                FROM appointments
+                WHERE id = $1
+                LIMIT 1
+            `,
+            [appointmentId]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+
+        const appointment = existing.rows[0];
+        if (!["confirmed", "late"].includes(String(appointment.status || "").toLowerCase())) {
+            return res.status(400).json({ error: "Only active appointments can be marked as no-show" });
+        }
+
+        const settlement = await settleAppointmentPolicyWithStripe(
+            appointment,
+            50,
+            "admin_no_show"
+        );
 
         const result = await pool.query(
             `
@@ -1956,11 +2070,12 @@ app.post("/api/admin/appointments/:id/no-show", requireAdmin, requireAdminCsrf, 
             [appointmentId]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(400).json({ error: "Only active appointments can be marked as no-show" });
-        }
-
-        return res.json({ success: true, id: result.rows[0].id });
+        return res.json({
+            success: true,
+            id: result.rows[0].id,
+            feePercent: 50,
+            settlement
+        });
     } catch (error) {
         return sendInternalError(res, "Admin no-show error:", error);
     }
@@ -2403,25 +2518,52 @@ app.post("/api/admin/appointments/:id/cancel", requireAdmin, requireAdminCsrf, a
             return res.status(400).json({ error: "Invalid appointment ID" });
         }
 
+        const existing = await pool.query(
+            `
+                SELECT id, date::text AS date, TO_CHAR(time, 'HH24:MI') AS time, status, price, stripe_payment_id
+                FROM appointments
+                WHERE id = $1
+                LIMIT 1
+            `,
+            [appointmentId]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+
+        const appointment = existing.rows[0];
+        if (!["confirmed", "late"].includes(String(appointment.status || "").toLowerCase())) {
+            return res.status(400).json({ error: "Only active appointments can be cancelled" });
+        }
+
+        const feePercent = calculateLateCancellationFeePercent(appointment.date, appointment.time);
+        const settlement = await settleAppointmentPolicyWithStripe(
+            appointment,
+            feePercent,
+            "admin_cancel"
+        );
+
         const result = await pool.query(
             `
                 UPDATE appointments
                 SET status = 'cancelled',
                     cancelled_at = NOW(),
-                    cancellation_fee_percent = 0,
+                    cancellation_fee_percent = $2,
                     no_show_fee_percent = 0
                 WHERE id = $1
                   AND status IN ('confirmed', 'late')
                 RETURNING id
             `,
-            [appointmentId]
+            [appointmentId, feePercent]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(400).json({ error: "Only active appointments can be cancelled" });
-        }
-
-        res.json({ success: true, id: result.rows[0].id });
+        res.json({
+            success: true,
+            id: result.rows[0].id,
+            feePercent,
+            settlement
+        });
     } catch (err) {
         console.error("Admin cancel error:", err);
         return sendInternalError(res, "Admin cancel appointment error:", err);
