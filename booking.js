@@ -209,15 +209,18 @@ function highlightSelectedBlock(startTime) {
     });
 }
 
-function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15) {
+function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15, endMinute = 0) {
     const slots = [];
+    let currentMinutes = startHour * 60;
+    const endMinutes = endHour * 60 + endMinute;
 
-    for (let hour = startHour; hour < endHour; hour += 1) {
-        for (let minute = 0; minute < 60; minute += intervalMinutes) {
-            const hh = String(hour).padStart(2, "0");
-            const mm = String(minute).padStart(2, "0");
-            slots.push(`${hh}:${mm}`);
-        }
+    while (currentMinutes < endMinutes) {
+        const hour = Math.floor(currentMinutes / 60);
+        const minute = currentMinutes % 60;
+        const hh = String(hour).padStart(2, "0");
+        const mm = String(minute).padStart(2, "0");
+        slots.push(`${hh}:${mm}`);
+        currentMinutes += intervalMinutes;
     }
 
     return slots;
@@ -254,7 +257,7 @@ function loadCart() {
     }
 }
 
-const times = buildTimeSlots(9, 18, 15);
+const times = buildTimeSlots(9, 17, 15, 30);
 
 // Generate time buttons
 function generateTimeSlots(date) {
@@ -272,7 +275,7 @@ function generateTimeSlots(date) {
         })
         .then(appointments => {
             const requestedDuration = getRequestedDuration();
-            const closeOfDay = toMinutes("18:00");
+            const closeOfDay = toMinutes("17:30");
             const columnsPerRow = 4;
 
             let row = null;
@@ -318,6 +321,22 @@ function generateTimeSlots(date) {
                 cell.appendChild(btn);
                 row.appendChild(cell);
             });
+
+            const remainder = times.length % columnsPerRow;
+            if (remainder !== 0 && row) {
+                for (let column = remainder; column < columnsPerRow; column += 1) {
+                    const spacerCell = document.createElement("td");
+                    spacerCell.className = "time-slot-placeholder";
+                    spacerCell.setAttribute("aria-hidden", "true");
+
+                    const spacer = document.createElement("span");
+                    spacer.className = "time-slot-spacer";
+                    spacer.textContent = "-";
+
+                    spacerCell.appendChild(spacer);
+                    row.appendChild(spacerCell);
+                }
+            }
         })
         .catch(err => {
             console.error("Error fetching appointments:", err);

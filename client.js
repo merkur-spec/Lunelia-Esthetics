@@ -104,21 +104,24 @@ function rangesOverlap(startA, durationA, startB, durationB) {
     return startA < startB + durationB && startB < startA + durationA;
 }
 
-function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15) {
+function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15, endMinute = 0) {
     const slots = [];
+    let currentMinutes = startHour * 60;
+    const endMinutes = endHour * 60 + endMinute;
 
-    for (let hour = startHour; hour < endHour; hour += 1) {
-        for (let minute = 0; minute < 60; minute += intervalMinutes) {
-            const hh = String(hour).padStart(2, "0");
-            const mm = String(minute).padStart(2, "0");
-            slots.push(`${hh}:${mm}`);
-        }
+    while (currentMinutes < endMinutes) {
+        const hour = Math.floor(currentMinutes / 60);
+        const minute = currentMinutes % 60;
+        const hh = String(hour).padStart(2, "0");
+        const mm = String(minute).padStart(2, "0");
+        slots.push(`${hh}:${mm}`);
+        currentMinutes += intervalMinutes;
     }
 
     return slots;
 }
 
-const rescheduleTimes = buildTimeSlots(9, 18, 15);
+const rescheduleTimes = buildTimeSlots(9, 17, 15, 30);
 
 async function fetchFromApi(path, options = {}) {
     let lastNetworkError = null;
@@ -210,7 +213,7 @@ async function renderRescheduleSlots(date) {
 
     rescheduleSlotsBody.innerHTML = "";
     const requestedDuration = Number(activeReschedule.durationMinutes) || 30;
-    const closeOfDay = toMinutes("18:00");
+    const closeOfDay = toMinutes("17:30");
 
     try {
         const appointments = await fetchFromApi(`/api/appointments?date=${encodeURIComponent(date)}`)
@@ -278,6 +281,22 @@ async function renderRescheduleSlots(date) {
             cell.appendChild(button);
             row.appendChild(cell);
         });
+
+        const remainder = rescheduleTimes.length % columnsPerRow;
+        if (remainder !== 0 && row) {
+            for (let column = remainder; column < columnsPerRow; column += 1) {
+                const spacerCell = document.createElement("td");
+                spacerCell.className = "time-slot-placeholder";
+                spacerCell.setAttribute("aria-hidden", "true");
+
+                const spacer = document.createElement("span");
+                spacer.className = "time-slot-spacer";
+                spacer.textContent = "-";
+
+                spacerCell.appendChild(spacer);
+                row.appendChild(spacerCell);
+            }
+        }
 
         if (rescheduleMessage) {
             rescheduleMessage.textContent = "Select a new time, then confirm reschedule.";

@@ -2549,16 +2549,20 @@ app.post("/api/admin/appointments/:id/cancel", requireAdmin, requireAdminCsrf, a
                 UPDATE appointments
                 SET status = 'cancelled',
                     cancelled_at = NOW(),
-                    cancellation_fee_percent = $2,
+                    cancellation_fee_percent = $1,
                     no_show_fee_percent = 0
-                WHERE id = $1
+                WHERE id = $2
                   AND status IN ('confirmed', 'late')
                 RETURNING id
             `,
-            [appointmentId, feePercent]
+            [feePercent, appointmentId]
         );
 
-        res.json({
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: "Appointment could not be cancelled" });
+        }
+
+        return res.json({
             success: true,
             id: result.rows[0].id,
             feePercent,
@@ -2566,7 +2570,7 @@ app.post("/api/admin/appointments/:id/cancel", requireAdmin, requireAdminCsrf, a
         });
     } catch (err) {
         console.error("Admin cancel error:", err);
-        return sendInternalError(res, "Admin cancel appointment error:", err);
+        return sendInternalError(res, "Admin cancel error:", err);
     }
 });
 
