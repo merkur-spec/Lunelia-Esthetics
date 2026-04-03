@@ -184,6 +184,38 @@ pool.on('error', (err) => {
     console.error('Unexpected error on idle client', err);
 });
 
+async function withAppointmentLocks(lockKeys, callback) {
+    const client = await pool.connect();
+
+    try {
+        await client.query("BEGIN");
+
+        const uniqueKeys = [...new Set((lockKeys || []).filter(Boolean).map((key) => String(key)))].sort();
+
+        for (const key of uniqueKeys) {
+            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [key]);
+        }
+
+        const result = await callback(client);
+        await client.query("COMMIT");
+        return result;
+    } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Rollback error during appointment lock transaction:", rollbackError);
+        }
+
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+function getAppointmentDateLockKey(date) {
+    return date ? `appointments:${String(date).trim()}` : "";
+}
+
 async function migrateAppointmentDateTimeColumns() {
     try {
         const columnInfo = await pool.query(
@@ -1143,48 +1175,56 @@ app.post("/api/free-booking", async (req, res) => {
 
         const requestedDuration = getServicesTotalDuration(sanitizedServices);
 
-        const conflict = await pool.query(
-            `SELECT id FROM appointments
-             WHERE date = $1 AND status IN ('confirmed','late')
-             AND time < ($2::time + make_interval(mins => $3::int))
-             AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
-             LIMIT 1`,
-            [date, time, requestedDuration]
+        const appointmentId = await withAppointmentLocks(
+            [getAppointmentDateLockKey(date)],
+            async (db) => {
+                const conflict = await db.query(
+                    `SELECT id FROM appointments
+                     WHERE date = $1 AND status IN ('confirmed','late')
+                     AND time < ($2::time + make_interval(mins => $3::int))
+                     AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                     LIMIT 1`,
+                    [date, time, requestedDuration]
+                );
+
+                if (conflict.rows.length > 0) {
+                    const lockError = new Error("Time slot already booked");
+                    lockError.statusCode = 409;
+                    throw lockError;
+                }
+
+                let clientId = null;
+                if (customerEmail) {
+                    const cl = await db.query(
+                        "SELECT id FROM clients WHERE LOWER(email) = LOWER($1) LIMIT 1",
+                        [customerEmail]
+                    );
+                    clientId = cl.rows[0]?.id || null;
+                }
+
+                const freeToken = `WAXPASS-FREE-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
+                const specialTypes = JSON.stringify(specialsResult.specials.map((s) => s.type));
+
+                const insertResult = await db.query(
+                    `INSERT INTO appointments
+                     (date, time, duration_minutes, services, email, name, phone, price,
+                      stripe_payment_id, timezone, client_id, consent_signature,
+                      consent_accepted_at, referred_by_email, applied_specials, discount_cents, status)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),$13,$14,$15,'confirmed')
+                     RETURNING id`,
+                    [
+                        date, time, requestedDuration,
+                        JSON.stringify(sanitizedServices),
+                        customerEmail, customerName, customerPhone,
+                        0, freeToken, timezone || null, clientId,
+                        consentSignature, referralEmail || null,
+                        specialTypes, 0
+                    ]
+                );
+
+                return insertResult.rows[0].id;
+            }
         );
-        if (conflict.rows.length > 0) {
-            return res.status(409).json({ error: "Time slot already booked" });
-        }
-
-        let clientId = null;
-        if (customerEmail) {
-            const cl = await pool.query(
-                "SELECT id FROM clients WHERE LOWER(email) = LOWER($1) LIMIT 1",
-                [customerEmail]
-            );
-            clientId = cl.rows[0]?.id || null;
-        }
-
-        const freeToken = `WAXPASS-FREE-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
-        const specialTypes = JSON.stringify(specialsResult.specials.map((s) => s.type));
-
-        const insertResult = await pool.query(
-            `INSERT INTO appointments
-             (date, time, duration_minutes, services, email, name, phone, price,
-              stripe_payment_id, timezone, client_id, consent_signature,
-              consent_accepted_at, referred_by_email, applied_specials, discount_cents, status)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),$13,$14,$15,'confirmed')
-             RETURNING id`,
-            [
-                date, time, requestedDuration,
-                JSON.stringify(sanitizedServices),
-                customerEmail, customerName, customerPhone,
-                0, freeToken, timezone || null, clientId,
-                consentSignature, referralEmail || null,
-                specialTypes, 0
-            ]
-        );
-
-        const appointmentId = insertResult.rows[0].id;
 
         res.json({
             success: true,
@@ -1219,6 +1259,10 @@ app.post("/api/free-booking", async (req, res) => {
             }).catch((e) => console.error("Free booking email error:", e));
         }
     } catch (err) {
+        if (err?.statusCode === 409 || err?.code === "23505") {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
+
         return sendInternalError(res, "Free booking error:", err);
     }
 });
@@ -1421,148 +1465,146 @@ app.post("/api/confirm-booking", async (req, res) => {
             return res.status(400).json({ error: "Missing signed consent form" });
         }
 
-        let clientId = null;
-        if (appointmentEmail) {
-            const clientLookup = await pool.query(
-                "SELECT id FROM clients WHERE LOWER(email) = LOWER($1) LIMIT 1",
-                [appointmentEmail]
-            );
-            clientId = clientLookup.rows[0]?.id || null;
-        }
-
-        const existing = await pool.query(
-            "SELECT id, TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes, services, email, name, phone, price, timezone FROM appointments WHERE stripe_payment_id = $1 LIMIT 1",
-            [session.payment_intent]
-        );
-        if (existing.rows.length > 0) {
-            const existingRow = existing.rows[0];
-            let parsedServices = [];
-            try {
-                parsedServices = JSON.parse(existingRow.services || "[]");
-            } catch (err) {
-                parsedServices = [];
-            }
-
-            return res.json({
-                success: true,
-                appointmentId: existingRow.id,
-                appointment: {
-                    date: existingRow.date,
-                    time: existingRow.time,
-                    services: parsedServices,
-                    email: existingRow.email,
-                    name: existingRow.name,
-                    phone: existingRow.phone,
-                    price: existingRow.price,
-                    timezone: existingRow.timezone
+        const responsePayload = await withAppointmentLocks(
+            [getAppointmentDateLockKey(date)],
+            async (db) => {
+                let clientId = null;
+                if (appointmentEmail) {
+                    const clientLookup = await db.query(
+                        "SELECT id FROM clients WHERE LOWER(email) = LOWER($1) LIMIT 1",
+                        [appointmentEmail]
+                    );
+                    clientId = clientLookup.rows[0]?.id || null;
                 }
-            });
-        }
-        const overlap = await pool.query(
-            `
-                SELECT id
-                FROM appointments
-                                WHERE date = $1
-                                    AND status IN ('confirmed', 'late')
-                  AND time < ($2::time + make_interval(mins => $3::int))
-                  AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
-                LIMIT 1
-            `,
-            [date, time, appointmentDuration]
+
+                const existing = await db.query(
+                    "SELECT id, TO_CHAR(date, 'YYYY-MM-DD') AS date, TO_CHAR(time, 'HH24:MI') AS time, COALESCE(duration_minutes, 30) AS duration_minutes, services, email, name, phone, price, timezone FROM appointments WHERE stripe_payment_id = $1 LIMIT 1",
+                    [session.payment_intent]
+                );
+                if (existing.rows.length > 0) {
+                    const existingRow = existing.rows[0];
+                    let parsedServices = [];
+                    try {
+                        parsedServices = JSON.parse(existingRow.services || "[]");
+                    } catch (err) {
+                        parsedServices = [];
+                    }
+
+                    return {
+                        success: true,
+                        appointmentId: existingRow.id,
+                        appointment: {
+                            date: existingRow.date,
+                            time: existingRow.time,
+                            services: parsedServices,
+                            email: existingRow.email,
+                            name: existingRow.name,
+                            phone: existingRow.phone,
+                            price: existingRow.price,
+                            timezone: existingRow.timezone
+                        }
+                    };
+                }
+
+                const overlap = await db.query(
+                    `
+                        SELECT id
+                        FROM appointments
+                        WHERE date = $1
+                          AND status IN ('confirmed', 'late')
+                          AND time < ($2::time + make_interval(mins => $3::int))
+                          AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                        LIMIT 1
+                    `,
+                    [date, time, appointmentDuration]
+                );
+
+                if (overlap.rows.length > 0) {
+                    const lockError = new Error("Time slot already booked");
+                    lockError.statusCode = 409;
+                    throw lockError;
+                }
+
+                const result = await db.query(
+                    "INSERT INTO appointments (date, time, duration_minutes, services, email, name, phone, price, stripe_payment_id, timezone, client_id, consent_signature, consent_accepted_at, referred_by_email, applied_specials, discount_cents) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13, $14, $15) RETURNING id",
+                    [
+                        date,
+                        time,
+                        appointmentDuration,
+                        services,
+                        appointmentEmail,
+                        appointmentName,
+                        appointmentPhone,
+                        session.amount_total,
+                        session.payment_intent,
+                        timezone || null,
+                        clientId,
+                        signedConsentName,
+                        referredByEmail || null,
+                        metaAppliedSpecials || null,
+                        metaDiscountCents ? parseInt(metaDiscountCents, 10) : 0
+                    ]
+                );
+
+                await db.query(
+                    "UPDATE payments SET status = $1, stripe_payment_intent_id = $2 WHERE stripe_session_id = $3",
+                    ["completed", session.payment_intent, sessionId]
+                );
+
+                return {
+                    success: true,
+                    appointmentId: result.rows[0].id,
+                    appointment: {
+                        date,
+                        time,
+                        services: servicesList,
+                        email: appointmentEmail,
+                        name: appointmentName,
+                        phone: appointmentPhone,
+                        price: session.amount_total,
+                        timezone: timezone || null
+                    }
+                };
+            }
         );
 
-        if (overlap.rows.length > 0) {
-            return res.status(409).json({ error: "Time slot already booked" });
-        }
+        res.json(responsePayload);
 
-        // Insert appointment
-        try {
-            const result = await pool.query(
-                "INSERT INTO appointments (date, time, duration_minutes, services, email, name, phone, price, stripe_payment_id, timezone, client_id, consent_signature, consent_accepted_at, referred_by_email, applied_specials, discount_cents) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13, $14, $15) RETURNING id",
-                [
-                    date,
-                    time,
-                    appointmentDuration,
-                    services,
-                    appointmentEmail,
-                    appointmentName,
-                    appointmentPhone,
-                    session.amount_total,
-                    session.payment_intent,
-                    timezone || null,
-                    clientId,
-                    signedConsentName,
-                    referredByEmail || null,
-                    metaAppliedSpecials || null,
-                    metaDiscountCents ? parseInt(metaDiscountCents, 10) : 0
-                ]
-            );
+        if (responsePayload.appointmentId && appointmentEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            transporter
+                .sendMail({
+                    from: process.env.EMAIL_USER,
+                    to: appointmentEmail,
+                    subject: "Booking Confirmation - Lunelia Esthetics",
+                    html: `
+                        <h2>Your Booking is Confirmed!</h2>
+                        <p>Hi ${appointmentName || "Valued Client"},</p>
+                        <p>Thank you for booking with Lunelia Esthetics. Here are your appointment details:</p>
+                        <p><strong>Date:</strong> ${date}</p>
+                        <p><strong>Time:</strong> ${time}</p>
+                        <p><strong>Services:</strong> ${servicesList.map((service) => service.name).join(", ")}</p>
+                        <p><strong>Amount Paid:</strong> $${(session.amount_total / 100).toFixed(2)}</p>
 
-            const appointmentId = result.rows[0].id;
+                        <h3>Booking Policy</h3>
+                        <ul>
+                            <li>If you are more than 10 minutes late, your appointment may be forfeited and rescheduled.</li>
+                            <li>No-shows are charged 50% of the booked service total.</li>
+                            <li>Last-minute cancellations (within 24 hours) are charged 30% of the booked service total.</li>
+                        </ul>
 
-            // Update payment status
-            await pool.query(
-                "UPDATE payments SET status = $1, stripe_payment_intent_id = $2 WHERE stripe_session_id = $3",
-                ["completed", session.payment_intent, sessionId]
-            );
-
-            const responsePayload = {
-                success: true,
-                appointmentId,
-                appointment: {
-                    date,
-                    time,
-                    services: servicesList,
-                    email: appointmentEmail,
-                    name: appointmentName,
-                    phone: appointmentPhone,
-                    price: session.amount_total,
-                    timezone: timezone || null
-                }
-            };
-
-            res.json(responsePayload);
-
-            // Send confirmation email without blocking the browser success page.
-            if (appointmentEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-                transporter
-                    .sendMail({
-                        from: process.env.EMAIL_USER,
-                        to: appointmentEmail,
-                        subject: "Booking Confirmation - Lunelia Esthetics",
-                        html: `
-                            <h2>Your Booking is Confirmed!</h2>
-                            <p>Hi ${appointmentName || "Valued Client"},</p>
-                            <p>Thank you for booking with Lunelia Esthetics. Here are your appointment details:</p>
-                            <p><strong>Date:</strong> ${date}</p>
-                            <p><strong>Time:</strong> ${time}</p>
-                            <p><strong>Services:</strong> ${servicesList.map((service) => service.name).join(", ")}</p>
-                            <p><strong>Amount Paid:</strong> $${(session.amount_total / 100).toFixed(2)}</p>
-
-                            <h3>Booking Policy</h3>
-                            <ul>
-                                <li>If you are more than 10 minutes late, your appointment may be forfeited and rescheduled.</li>
-                                <li>No-shows are charged 50% of the booked service total.</li>
-                                <li>Last-minute cancellations (within 24 hours) are charged 30% of the booked service total.</li>
-                            </ul>
-
-                            <p>We look forward to seeing you!</p>
-                            <p>Lunelia Esthetics</p>
-                        `
-                    })
-                    .catch((emailError) => {
-                        console.error("Email Error:", emailError);
-                    });
-            }
-        } catch (dbErr) {
-            console.error("DB Error:", dbErr);
-            if (dbErr.code === "23505") {
-                return res.status(409).json({ error: "Time slot already booked" });
-            }
-            res.status(500).json({ error: dbErr.message });
+                        <p>We look forward to seeing you!</p>
+                        <p>Lunelia Esthetics</p>
+                    `
+                })
+                .catch((emailError) => {
+                    console.error("Email Error:", emailError);
+                });
         }
     } catch (error) {
         console.error("Error:", error);
+        if (error?.statusCode === 409 || error?.code === "23505") {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
         return sendInternalError(res, "Confirm booking error:", error);
     }
 });
@@ -1934,49 +1976,62 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
             return res.status(400).json({ error: "Valid date and time are required" });
         }
 
-        const existing = await pool.query(
-            `
-                SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
-                FROM appointments
-                                WHERE id = $1
-                                    AND LOWER(email) = LOWER($2)
-                                    AND status IN ('confirmed', 'late')
-                LIMIT 1
-            `,
-            [appointmentId, email]
-        );
+        await withAppointmentLocks([getAppointmentDateLockKey(date)], async (db) => {
+            const existing = await db.query(
+                `
+                    SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
+                    FROM appointments
+                    WHERE id = $1
+                      AND LOWER(email) = LOWER($2)
+                      AND status IN ('confirmed', 'late')
+                    LIMIT 1
+                    FOR UPDATE
+                `,
+                [appointmentId, email]
+            );
 
-        if (existing.rows.length === 0) {
-            return res.status(404).json({ error: "Appointment not found" });
-        }
+            if (existing.rows.length === 0) {
+                const notFoundError = new Error("Appointment not found");
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
 
-        const duration = Number(existing.rows[0].duration_minutes) || 30;
+            const duration = Number(existing.rows[0].duration_minutes) || 30;
 
-        const overlap = await pool.query(
-            `
-                SELECT id
-                FROM appointments
-                                WHERE id <> $1
-                                    AND date = $2
-                                    AND status IN ('confirmed', 'late')
-                  AND time < ($3::time + make_interval(mins => $4::int))
-                  AND $3::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
-                LIMIT 1
-            `,
-            [appointmentId, date, time, duration]
-        );
+            const overlap = await db.query(
+                `
+                    SELECT id
+                    FROM appointments
+                    WHERE id <> $1
+                      AND date = $2
+                      AND status IN ('confirmed', 'late')
+                      AND time < ($3::time + make_interval(mins => $4::int))
+                      AND $3::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                    LIMIT 1
+                `,
+                [appointmentId, date, time, duration]
+            );
 
-        if (overlap.rows.length > 0) {
-            return res.status(409).json({ error: "Time slot already booked" });
-        }
+            if (overlap.rows.length > 0) {
+                const lockError = new Error("Time slot already booked");
+                lockError.statusCode = 409;
+                throw lockError;
+            }
 
-        await pool.query(
-            "UPDATE appointments SET date = $1, time = $2 WHERE id = $3",
-            [date, time, appointmentId]
-        );
+            await db.query(
+                "UPDATE appointments SET date = $1, time = $2 WHERE id = $3",
+                [date, time, appointmentId]
+            );
+        });
 
         return res.json({ success: true, date, time });
     } catch (error) {
+        if (error?.statusCode === 404) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+        if (error?.statusCode === 409 || error?.code === "23505") {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
         return sendInternalError(res, "Client reschedule error:", error);
     }
 });
@@ -2154,57 +2209,70 @@ app.post("/api/admin/appointments/:id/reschedule", requireAdmin, requireAdminCsr
             return res.status(400).json({ error: "Valid date and time are required" });
         }
 
-        const existing = await pool.query(
-            `
-                SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
-                FROM appointments
-                WHERE id = $1
-                  AND status IN ('confirmed', 'late')
-                LIMIT 1
-            `,
-            [appointmentId]
-        );
+        await withAppointmentLocks([getAppointmentDateLockKey(date)], async (db) => {
+            const existing = await db.query(
+                `
+                    SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
+                    FROM appointments
+                    WHERE id = $1
+                      AND status IN ('confirmed', 'late')
+                    LIMIT 1
+                    FOR UPDATE
+                `,
+                [appointmentId]
+            );
 
-        if (existing.rows.length === 0) {
-            return res.status(404).json({ error: "Appointment not found" });
-        }
+            if (existing.rows.length === 0) {
+                const notFoundError = new Error("Appointment not found");
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
 
-        const duration = Number(existing.rows[0].duration_minutes) || 30;
+            const duration = Number(existing.rows[0].duration_minutes) || 30;
 
-        const overlap = await pool.query(
-            `
-                SELECT id
-                FROM appointments
-                WHERE id <> $1
-                  AND date = $2
-                  AND status IN ('confirmed', 'late')
-                  AND time < ($3::time + make_interval(mins => $4::int))
-                  AND $3::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
-                LIMIT 1
-            `,
-            [appointmentId, date, time, duration]
-        );
+            const overlap = await db.query(
+                `
+                    SELECT id
+                    FROM appointments
+                    WHERE id <> $1
+                      AND date = $2
+                      AND status IN ('confirmed', 'late')
+                      AND time < ($3::time + make_interval(mins => $4::int))
+                      AND $3::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
+                    LIMIT 1
+                `,
+                [appointmentId, date, time, duration]
+            );
 
-        if (overlap.rows.length > 0) {
-            return res.status(409).json({ error: "Time slot already booked" });
-        }
+            if (overlap.rows.length > 0) {
+                const lockError = new Error("Time slot already booked");
+                lockError.statusCode = 409;
+                throw lockError;
+            }
 
-        await pool.query(
-            `
-                UPDATE appointments
-                SET date = $1,
-                    time = $2,
-                    status = 'confirmed',
-                    cancelled_at = NULL,
-                    cancellation_fee_percent = 0,
-                    no_show_fee_percent = 0
-                WHERE id = $3
-            `,
-            [date, time, appointmentId]
-        );
+            await db.query(
+                `
+                    UPDATE appointments
+                    SET date = $1,
+                        time = $2,
+                        status = 'confirmed',
+                        cancelled_at = NULL,
+                        cancellation_fee_percent = 0,
+                        no_show_fee_percent = 0
+                    WHERE id = $3
+                `,
+                [date, time, appointmentId]
+            );
+        });
 
         return res.json({ success: true, date, time });
     } catch (error) {
+        if (error?.statusCode === 404) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+        if (error?.statusCode === 409 || error?.code === "23505") {
+            return res.status(409).json({ error: "Time slot already booked" });
+        }
         return sendInternalError(res, "Admin reschedule error:", error);
     }
 });
