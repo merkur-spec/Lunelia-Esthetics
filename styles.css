@@ -376,7 +376,12 @@ body:not(.home-page):not(.booking-page) .content-page ul {
         gap: 18px;
     }
 
+    .about-page .about-copy {
+        order: 1;
+    }
+
     .about-page .about-image-wrap {
+        order: 2;
         max-width: 340px;
         width: 100%;
         margin: 0 auto;
