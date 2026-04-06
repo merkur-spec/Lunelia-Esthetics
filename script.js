@@ -17,9 +17,22 @@ const uiServiceData = Object.fromEntries(
 // Cart
 let cart = [];
 let total = 0;
+const PENDING_BOOKING_KEY = "pendingBookingDraft";
 const cartMessage = document.getElementById("cart-message");
 const cartItemsList = document.getElementById("cart-items");
 const totalElement = document.getElementById("total");
+
+function persistHomeCartState() {
+    if (cart.length === 0) {
+        localStorage.removeItem("cart");
+        localStorage.removeItem("total");
+        localStorage.removeItem(PENDING_BOOKING_KEY);
+        return;
+    }
+
+    localStorage.setItem("cart", JSON.stringify(cart));
+    localStorage.setItem("total", String(total));
+}
 
 // Render Services
 Object.keys(uiServiceData).forEach(categoryId => {
@@ -157,6 +170,7 @@ function removeFromHomeCart(index) {
     }
 
     total = Math.max(0, total - Number(removedItem.price || 0));
+    persistHomeCartState();
     renderHomeCart();
 
     if (cartMessage) {
@@ -186,6 +200,7 @@ function addToCart(service) {
 
     cart.push(service);
     total += service.price;
+    persistHomeCartState();
     renderHomeCart();
 
     if (cartMessage) {
@@ -214,8 +229,9 @@ document.getElementById("checkout-btn").addEventListener("click", () => {
         return;
     }
     // Save cart to localStorage for next page
-    localStorage.setItem("cart", JSON.stringify(cart));
-    localStorage.setItem("total", total);
+    persistHomeCartState();
     // Redirect to booking page
     window.location.href = "booking.html";
 });
+
+persistHomeCartState();

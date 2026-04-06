@@ -22,6 +22,13 @@ let total = 0;
 let appliedSpecials = null; // result from /api/booking/preview-specials
 
 function persistCartState() {
+    if (cart.length === 0) {
+        localStorage.removeItem("cart");
+        localStorage.removeItem("total");
+        localStorage.removeItem(PENDING_BOOKING_KEY);
+        return;
+    }
+
     localStorage.setItem("cart", JSON.stringify(cart));
     localStorage.setItem("total", String(total));
 }

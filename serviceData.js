@@ -45,10 +45,10 @@ const serviceData = {
         name: "Intimate Waxing Services",
         badge: null,
         services: [
-            { id: "brazilian", name: "Brazilian (Specialty)", price: 33, duration: 30, description: "", badge: "Specialty" },
+            { id: "brazilian", name: "Brazilian (Specialty)", price: 58, duration: 30, description: "", badge: "Specialty" },
             { id: "bikini-full", name: "Bikini Full", price: 48, duration: 25, description: "" },
-            { id: "bikini-line-v", name: "Bikini Line (V)", price: 20, duration: 20, description: "" },
-            { id: "bikini-line-f", name: "Bikini Line (F)", price: 20, duration: 20, description: "" },
+            { id: "bikini-line-v", name: "Bikini Line (V)", price: 42, duration: 20, description: "" },
+            { id: "bikini-line-f", name: "Bikini Line (F)", price: 43, duration: 20, description: "" },
             { id: "inner-thigh", name: "Inner Thigh", price: 8, duration: 13, description: "" },
             { id: "full-butt", name: "Full Butt", price: 25, duration: 25, description: "" },
             { id: "butt-strip", name: "Butt Strip", price: 18, duration: 13, description: "" },

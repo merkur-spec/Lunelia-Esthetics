@@ -648,8 +648,8 @@ async function getApplicableSpecials(email, sanitizedServices, referralEmail) {
     if (isNewClient) {
         const hasBrazilian = sanitizedServices.some((s) => s.id === "brazilian");
         if (hasBrazilian) {
-            result.priceOverridesCents["brazilian"] = 5500; // $55.00
-            result.specials.push({ type: "new_client_brazilian", label: "\u2728 New Client Special: First Brazilian — $55" });
+            result.priceOverridesCents["brazilian"] = 4500; // $45.00
+            result.specials.push({ type: "new_client_brazilian", label: "\u2728 New Client Special: First Brazilian — $45" });
         }
         const hasBikini = sanitizedServices.some((s) => s.id === "bikini-full");
         if (hasBikini) {
@@ -1341,6 +1341,20 @@ app.post("/api/create-payment-intent", async (req, res) => {
         if (conflict.rows.length > 0) {
             return res.status(409).json({ error: "Time slot already booked" });
         }
+
+        const serviceSummary = sanitizedServices.map((service) => service.name).join(", ");
+        const appliedSpecialLabels = specialsResult.specials
+            .map((special) => String(special?.label || "").trim())
+            .filter(Boolean);
+        const checkoutDescription = [
+            serviceSummary,
+            appliedSpecialLabels.length > 0
+                ? `Specials applied: ${appliedSpecialLabels.join("; ")}`
+                : ""
+        ]
+            .filter(Boolean)
+            .join(" | ")
+            .slice(0, 500);
         
         // Create Stripe Checkout Session
         const session = await stripe.checkout.sessions.create({
@@ -1350,8 +1364,11 @@ app.post("/api/create-payment-intent", async (req, res) => {
                     price_data: {
                         currency: "usd",
                         product_data: {
-                            name: "Lunelia Esthetics Booking",
-                            description: sanitizedServices.map((service) => service.name).join(", ")
+                            name:
+                                appliedSpecialLabels.length > 0
+                                    ? "Lunelia Esthetics Booking (Special Applied)"
+                                    : "Lunelia Esthetics Booking",
+                            description: checkoutDescription
                         },
                         unit_amount: parsedAmount
                     },

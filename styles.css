@@ -331,6 +331,58 @@ body:not(.home-page):not(.booking-page) .content-page ul {
     padding-left: 0;
 }
 
+.about-page .about-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) 1fr;
+    gap: 28px;
+    align-items: start;
+    text-align: left;
+}
+
+.about-page .about-image-wrap {
+    margin: 0;
+}
+
+.about-page .about-image {
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    display: block;
+    border-radius: 12px;
+    border: 1px solid #dbe9df;
+    background: #000;
+}
+
+.about-page .about-copy h3 {
+    margin-top: 0;
+    text-align: left;
+}
+
+.about-page .about-copy p,
+.about-page .about-copy li,
+.about-page .about-copy ul {
+    text-align: left;
+}
+
+.about-page .about-copy ul {
+    list-style-position: outside;
+    padding-left: 20px;
+    margin: 0;
+}
+
+@media (max-width: 760px) {
+    .about-page .about-layout {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .about-page .about-image-wrap {
+        max-width: 340px;
+        width: 100%;
+        margin: 0 auto;
+    }
+}
+
 header {
     display: flex;
     flex-direction: column;
