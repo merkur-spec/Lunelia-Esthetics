@@ -636,6 +636,43 @@ async function getApplicableSpecials(email, sanitizedServices, referralEmail) {
 
     const normalizedEmail = normalizeEmail(email);
 
+    const referralUsedCount = await pool.query(
+        `SELECT COUNT(*) FROM appointments
+         WHERE LOWER(email) = $1
+           AND status IN ('confirmed','late','completed','no_show')
+           AND NULLIF(BTRIM(COALESCE(referred_by_email, '')), '') IS NOT NULL`,
+        [normalizedEmail]
+    );
+    const hasUsedReferralBefore = parseInt(referralUsedCount.rows[0].count, 10) > 0;
+
+    // --- Referrer reward check ($15 off for the person who referred someone) ---
+    const referralCreditsEarnedCount = await pool.query(
+        `SELECT COUNT(*) FROM appointments
+         WHERE LOWER(COALESCE(referred_by_email, '')) = $1
+           AND status IN ('confirmed','late','completed','no_show')`,
+        [normalizedEmail]
+    );
+    const referralCreditsUsedCount = await pool.query(
+        `SELECT COUNT(*) FROM appointments
+         WHERE LOWER(email) = $1
+           AND status IN ('confirmed','late','completed','no_show')
+           AND COALESCE(applied_specials, '') LIKE '%"referrer_credit"%'`,
+        [normalizedEmail]
+    );
+    const referralCreditsAvailable =
+        Math.max(
+            0,
+            parseInt(referralCreditsEarnedCount.rows[0].count, 10) -
+                parseInt(referralCreditsUsedCount.rows[0].count, 10)
+        );
+    if (referralCreditsAvailable > 0) {
+        result.flatDiscountCents += 1500; // $15.00
+        result.specials.push({
+            type: "referrer_credit",
+            label: "\uD83D\uDC9D Referral Reward: $15 off"
+        });
+    }
+
     // --- New client check ---
     const priorCount = await pool.query(
         `SELECT COUNT(*) FROM appointments
@@ -648,12 +685,12 @@ async function getApplicableSpecials(email, sanitizedServices, referralEmail) {
     if (isNewClient) {
         const hasBrazilian = sanitizedServices.some((s) => s.id === "brazilian");
         if (hasBrazilian) {
-            result.priceOverridesCents["brazilian"] = 4500; // $45.00
-            result.specials.push({ type: "new_client_brazilian", label: "\u2728 New Client Special: First Brazilian — $45" });
+            result.priceOverridesCents["brazilian"] = 5500; // $55.00
+            result.specials.push({ type: "new_client_brazilian", label: "\u2728 New Client Special: First Brazilian — $55" });
         }
         const hasBikini = sanitizedServices.some((s) => s.id === "bikini-full");
         if (hasBikini) {
-            // Bikini Full is already $48 — label only, no price change needed
+            result.priceOverridesCents["bikini-full"] = 4800; // $48.00
             result.specials.push({ type: "new_client_bikini", label: "\u2728 New Client Special: First Bikini Full — $48" });
         }
     }
@@ -670,19 +707,19 @@ async function getApplicableSpecials(email, sanitizedServices, referralEmail) {
         result.specials.push({ type: "loyalty_free", label: "\uD83C\uDF89 Wax Pass: Your 10th service is FREE!" });
     }
 
-    // --- Referral discount ($10 off) ---
-    if (referralEmail) {
+    // --- Referral discount ($15 off, one-time per client) ---
+    if (referralEmail && !hasUsedReferralBefore) {
         const normalizedReferral = normalizeEmail(referralEmail);
         if (normalizedReferral && normalizedReferral !== normalizedEmail) {
             const referrerExists = await pool.query(
-                `SELECT id FROM appointments
-                 WHERE LOWER(email) = $1 AND status IN ('confirmed','late','completed')
+                `SELECT id FROM clients
+                 WHERE LOWER(email) = $1
                  LIMIT 1`,
                 [normalizedReferral]
             );
             if (referrerExists.rows.length > 0) {
-                result.flatDiscountCents += 1000; // $10.00
-                result.specials.push({ type: "referral", label: "\uD83D\uDC9D Referral Discount: $10 off" });
+                result.flatDiscountCents += 1500; // $15.00
+                result.specials.push({ type: "referral", label: "\uD83D\uDC9D Referral Discount: $15 off" });
             }
         }
     }
@@ -1172,6 +1209,9 @@ app.post("/api/free-booking", async (req, res) => {
         if (!specialsResult.isFree) {
             return res.status(400).json({ error: "Free booking not applicable for this account" });
         }
+        const appliedReferralEmail = specialsResult.specials.some((s) => s.type === "referral")
+            ? referralEmail
+            : "";
 
         const requestedDuration = getServicesTotalDuration(sanitizedServices);
 
@@ -1217,7 +1257,7 @@ app.post("/api/free-booking", async (req, res) => {
                         JSON.stringify(sanitizedServices),
                         customerEmail, customerName, customerPhone,
                         0, freeToken, timezone || null, clientId,
-                        consentSignature, referralEmail || null,
+                        consentSignature, appliedReferralEmail || null,
                         specialTypes, 0
                     ]
                 );
@@ -1306,6 +1346,9 @@ app.post("/api/create-payment-intent", async (req, res) => {
 
         // Re-verify applicable specials server-side so the client cannot fake discounts
         const specialsResult = await getApplicableSpecials(customerEmail, sanitizedServices, referralEmail);
+        const appliedReferralEmail = specialsResult.specials.some((s) => s.type === "referral")
+            ? referralEmail
+            : "";
 
         // Compute authoritative expected amount: base prices + overrides - flat discount
         let expectedAmountCents = sanitizedServices.reduce((sum, svc) => sum + svc.price * 100, 0);
@@ -1386,7 +1429,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
                 name: customerName,
                 email: customerEmail,
                 phone: customerPhone,
-                referralEmail,
+                referralEmail: appliedReferralEmail,
                 timezone,
                 consentAccepted: String(consentAccepted),
                 consentSignature,

@@ -109,6 +109,7 @@ function renderCheckoutCart() {
     // Show applied specials
     const specialsBox = document.getElementById("specials-applied");
     const specialsList = document.getElementById("specials-applied-list");
+    const referrerCreditNote = document.getElementById("referrer-credit-note");
     if (specialsBox && specialsList) {
         const specials = appliedSpecials?.specials || [];
         if (specials.length > 0) {
@@ -118,8 +119,15 @@ function renderCheckoutCart() {
                 li.textContent = s.label;
                 specialsList.appendChild(li);
             });
+            if (referrerCreditNote) {
+                const hasReferrerCredit = specials.some((s) => s.type === "referrer_credit");
+                referrerCreditNote.style.display = hasReferrerCredit ? "block" : "none";
+            }
             specialsBox.style.display = "block";
         } else {
+            if (referrerCreditNote) {
+                referrerCreditNote.style.display = "none";
+            }
             specialsBox.style.display = "none";
         }
     }
@@ -418,6 +426,22 @@ payBtn.addEventListener("click", async () => {
     if (!nameInput.value.trim() || !emailInput.value.trim() || !phoneInput.value.trim()) {
         if (formMessage) {
             formMessage.textContent = "Please complete your contact details.";
+        }
+        return;
+    }
+
+    const email = emailInput.value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+        if (formMessage) {
+            formMessage.textContent = "Please enter a valid email address.";
+        }
+        return;
+    }
+
+    const phone = phoneInput.value.trim();
+    if (!/^\+?[\d\s\-().]+$/.test(phone) || phone.replace(/\D/g, "").length < 10) {
+        if (formMessage) {
+            formMessage.textContent = "Please enter a valid phone number.";
         }
         return;
     }

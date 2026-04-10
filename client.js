@@ -486,6 +486,9 @@ loginForm?.addEventListener("submit", async (event) => {
         }
 
         showDashboard(true);
+        window.dispatchEvent(new CustomEvent("client-auth-state-changed", {
+            detail: { signedIn: true }
+        }));
         setMessage("Signed in.", true);
         await loadAppointments();
     } catch (error) {
@@ -505,6 +508,9 @@ logoutButton?.addEventListener("click", async () => {
 
     closeReschedulePanel();
     showDashboard(false);
+    window.dispatchEvent(new CustomEvent("client-auth-state-changed", {
+        detail: { signedIn: false }
+    }));
     setMessage("Signed out.", false);
 });
 

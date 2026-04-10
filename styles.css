@@ -340,17 +340,21 @@ body:not(.home-page):not(.booking-page) .content-page ul {
 }
 
 .about-page .about-image-wrap {
-    margin: 0;
+    margin: 8px 0 0;
+    width: 100%;
+    max-width: 340px;
+    aspect-ratio: 9 / 10;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid #dbe9df;
+    background: #000;
 }
 
 .about-page .about-image {
     width: 100%;
-    aspect-ratio: 4 / 5;
+    height: 100%;
     object-fit: cover;
     display: block;
-    border-radius: 12px;
-    border: 1px solid #dbe9df;
-    background: #000;
 }
 
 .about-page .about-copy h3 {
