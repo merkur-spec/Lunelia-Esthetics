@@ -28,7 +28,7 @@ function updateRewardsDisclaimer(isSignedIn) {
         return;
     }
 
-    rewardsDisclaimer.textContent = "You must sign in to claim available specials";
+    rewardsDisclaimer.textContent = "You must be signed in to claim available specials.";
     rewardsDisclaimer.style.display = isSignedIn ? "none" : "";
 }
 
