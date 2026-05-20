@@ -38,6 +38,20 @@ function getPendingBooking() {
     }
 }
 
+function normalizeNameForComparison(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+}
+
+function signatureMatchesBookingName(signature, bookingName) {
+    const normalizedSignature = normalizeNameForComparison(signature);
+    const normalizedBookingName = normalizeNameForComparison(bookingName);
+
+    return Boolean(normalizedSignature) && Boolean(normalizedBookingName) && normalizedSignature === normalizedBookingName;
+}
+
 async function initStripe() {
     const response = await fetch("/api/stripe-public-key");
     const data = await response.json().catch(() => null);
@@ -61,6 +75,12 @@ form?.addEventListener("submit", async (event) => {
     const signature = signatureInput?.value?.trim() || "";
     if (!signature || signature.length < 2 || !acceptedInput?.checked) {
         setMessage("Please sign and accept the consent form before continuing.");
+        return;
+    }
+
+    const bookingName = String(pendingBooking?.customer?.name || "").trim();
+    if (!signatureMatchesBookingName(signature, bookingName)) {
+        setMessage("Consent signature must match the name used on the booking form.");
         return;
     }
 
@@ -175,7 +195,8 @@ form?.addEventListener("submit", async (event) => {
                         name: String(pendingBooking?.customer?.name || "").trim(),
                         email: String(pendingBooking?.customer?.email || "").trim(),
                         phone: String(pendingBooking?.customer?.phone || "").trim()
-                    }
+                    },
+                    consent: { accepted: true, signature }
                 })
             });
 

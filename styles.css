@@ -602,7 +602,7 @@ section {
     gap: 24px;
 }
 
-.booking-container section {
+.booking-container > section {
     margin: 0;
     padding: 0;
 }
@@ -613,7 +613,7 @@ section:nth-child(even) {
     border-radius: 10px;
 }
 
-.booking-container section:nth-child(even) {
+.booking-container > section:nth-child(even) {
     background-color: transparent;
     border-radius: 0;
 }
@@ -1198,10 +1198,96 @@ table {
     display: none !important;
 }
 
+.admin-section-nav {
+    width: min(1040px, 100%);
+    margin: 0 auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: nowrap;
+    background: #e6f2e8;
+    padding: 10px 16px;
+    border-bottom: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.admin-section-control {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-section-select-label {
+    color: #466551;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
+.admin-section-select {
+    width: min(100%, 280px);
+    min-width: 0;
+    margin-left: -2px;
+    padding: 10px 42px 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #79a98a;
+    background-color: #fff;
+    background-image:
+        linear-gradient(45deg, transparent 50%, #5f8f74 50%),
+        linear-gradient(135deg, #5f8f74 50%, transparent 50%),
+        linear-gradient(to bottom, #ffffff, #f7fcf8);
+    background-position:
+        calc(100% - 18px) calc(50% - 2px),
+        calc(100% - 12px) calc(50% - 2px),
+        0 0;
+    background-size: 6px 6px, 6px 6px, 100% 100%;
+    background-repeat: no-repeat;
+    appearance: none;
+    color: #355243;
+    font-size: 15px;
+    font-weight: 500;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.admin-section-select:hover {
+    border-color: #5f8f74;
+    background-color: #f7fcf8;
+}
+
+.admin-section-select:focus-visible {
+    outline: 3px solid #5f8f74;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px rgba(95, 143, 116, 0.18);
+}
+
+.admin-menu-logout-btn {
+    margin-left: auto;
+    margin-top: 0;
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid #79a98a;
+    background: #8fbe9f;
+    color: #fff;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.admin-menu-logout-btn:hover,
+.admin-menu-logout-btn:focus-visible {
+    background: #79a98a;
+}
+
 .admin-dashboard .calendar-booking {
     padding: 24px;
     width: min(1040px, 100%);
     margin: 0 auto;
+    background: #ffffff;
 }
 
 .client-page #client-dashboard .calendar-booking {
@@ -1836,6 +1922,13 @@ footer {
     .admin-page .admin-table {
         min-width: 0;
         width: 100%;
+    }
+
+    .admin-page .admin-table caption {
+        display: table-caption;
+        width: 100%;
+        text-align: center;
+        padding: 10px 0 8px;
     }
 
     .admin-page .admin-table thead {

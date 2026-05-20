@@ -469,12 +469,102 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+function formatServicesForEmail(services) {
+    if (!Array.isArray(services) || services.length === 0) {
+        return "-";
+    }
+
+    return services
+        .map((service) => String(service?.name || service?.id || "Service").trim())
+        .filter(Boolean)
+        .join(", ");
+}
+
+async function sendInternalBookingNotification(details = {}) {
+    const inbox = String(process.env.EMAIL_USER || "").trim();
+    const password = String(process.env.EMAIL_PASS || "").trim();
+
+    if (!inbox || !password) {
+        return;
+    }
+
+    const appointmentId = Number(details.appointmentId) || "N/A";
+    const date = String(details.date || "-").trim();
+    const time = String(details.time || "-").trim();
+    const clientName = String(details.name || "-").trim();
+    const nameParts = clientName.split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] || "-";
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "-";
+    const clientEmail = String(details.email || "-").trim();
+    const clientPhone = String(details.phone || "-").trim();
+    const source = String(details.source || "booking").trim();
+    const bookedAtRaw = String(details.bookedAt || new Date().toISOString()).trim();
+    const bookedAtDate = new Date(bookedAtRaw);
+    const bookedAt = Number.isNaN(bookedAtDate.getTime())
+        ? bookedAtRaw
+        : bookedAtDate.toLocaleString(undefined, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              timeZone: "America/New_York",
+              timeZoneName: "short"
+          });
+    const consentSignature = String(details.consentSignature || "").trim();
+    const services = formatServicesForEmail(details.services);
+    const totalPaidCents = Number(details.totalPaidCents);
+    const amountLine = Number.isFinite(totalPaidCents)
+        ? `<p><strong>Amount:</strong> $${(Math.max(0, totalPaidCents) / 100).toFixed(2)}</p>`
+        : "";
+    const consentLine = consentSignature
+        ? `
+            <p><strong>Signed Consent Form:</strong> Yes</p>
+            <p><strong>Consent Signature:</strong> ${consentSignature}</p>
+          `
+        : `<p><strong>Signed Consent Form:</strong> No signature captured</p>`;
+
+    await transporter.sendMail({
+        from: inbox,
+        to: inbox,
+        subject: `New Booking Received (${source})`,
+        html: `
+            <h2>New Booking Received</h2>
+            <p><strong>Appointment ID:</strong> ${appointmentId}</p>
+            <p><strong>Booked At:</strong> ${bookedAt}</p>
+            <p><strong>Appointment Date:</strong> ${date}</p>
+            <p><strong>Appointment Time:</strong> ${time}</p>
+            <p><strong>Client First Name:</strong> ${firstName}</p>
+            <p><strong>Client Last Name:</strong> ${lastName}</p>
+            <p><strong>Email:</strong> ${clientEmail}</p>
+            <p><strong>Phone:</strong> ${clientPhone}</p>
+            <p><strong>Service(s) Booked:</strong> ${services}</p>
+            ${amountLine}
+            ${consentLine}
+        `
+    });
+}
+
 function isValidDate(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function isValidTime(value) {
     return /^\d{2}:\d{2}$/.test(value);
+}
+
+function normalizeNameForComparison(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+}
+
+function signatureMatchesBookingName(signature, bookingName) {
+    const normalizedSignature = normalizeNameForComparison(signature);
+    const normalizedBookingName = normalizeNameForComparison(bookingName);
+
+    return Boolean(normalizedSignature) && Boolean(normalizedBookingName) && normalizedSignature === normalizedBookingName;
 }
 
 function formatDateISO(date) {
@@ -1617,6 +1707,10 @@ app.post("/api/free-booking", async (req, res) => {
             return res.status(400).json({ error: "Consent form must be signed" });
         }
 
+        if (!signatureMatchesBookingName(consentSignature, customerName)) {
+            return res.status(400).json({ error: "Consent signature must match booking name" });
+        }
+
         if (!isValidDate(date) || !isValidTime(time) || !sanitizedServices) {
             return res.status(400).json({ error: "Missing or invalid fields" });
         }
@@ -1709,6 +1803,19 @@ app.post("/api/free-booking", async (req, res) => {
             }
         });
 
+        sendInternalBookingNotification({
+            source: "free-booking",
+            appointmentId,
+            date,
+            time,
+            name: customerName,
+            email: customerEmail,
+            phone: customerPhone,
+            services: sanitizedServices,
+            totalPaidCents: 0,
+            consentSignature
+        }).catch((e) => console.error("Internal booking notify error:", e));
+
         // Send confirmation email
         if (customerEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
             transporter.sendMail({
@@ -1764,6 +1871,10 @@ app.post("/api/create-payment-intent", async (req, res) => {
 
         if (!consentAccepted || consentSignature.length < 2) {
             return res.status(400).json({ error: "Consent form must be signed" });
+        }
+
+        if (!signatureMatchesBookingName(consentSignature, customerName)) {
+            return res.status(400).json({ error: "Consent signature must match booking name" });
         }
 
         if (referralEmail && !/^\S+@\S+\.\S+$/.test(referralEmail)) {
@@ -1973,6 +2084,10 @@ app.post("/api/confirm-booking", async (req, res) => {
             return res.status(400).json({ error: "Missing signed consent form" });
         }
 
+        if (!signatureMatchesBookingName(signedConsentName, appointmentName)) {
+            return res.status(400).json({ error: "Consent signature must match booking name" });
+        }
+
         const responsePayload = await withAppointmentLocks(
             [getAppointmentDateLockKey(date)],
             async (db) => {
@@ -2077,6 +2192,21 @@ app.post("/api/confirm-booking", async (req, res) => {
         );
 
         res.json(responsePayload);
+
+        sendInternalBookingNotification({
+            source: "paid-booking",
+            appointmentId: responsePayload?.appointmentId,
+            date,
+            time,
+            name: appointmentName,
+            email: appointmentEmail,
+            phone: appointmentPhone,
+            services: servicesList,
+            totalPaidCents: Number(session.amount_total) || 0,
+            consentSignature: signedConsentName
+        }).catch((e) => {
+            console.error("Internal booking notify error:", e);
+        });
 
         if (responsePayload.appointmentId && appointmentEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
             transporter
@@ -3425,9 +3555,19 @@ app.get("/api/client/wax-passes", requireClient, async (req, res) => {
 // POST /api/wax-passes/purchase — create Stripe checkout for wax pass bundle
 app.post("/api/wax-passes/purchase", requireClient, requireCsrf, async (req, res) => {
     try {
-        const { serviceId, tier, customer } = req.body || {};
+        const { serviceId, tier, customer, consent } = req.body || {};
         const tierNum = Number(tier);
         if (![1, 2, 3].includes(tierNum)) return res.status(400).json({ error: "Invalid tier" });
+        const customerName = String(customer?.name || "").trim();
+        const consentAccepted = consent?.accepted === true;
+        const consentSignature = String(consent?.signature || "").trim();
+        if (!consentAccepted || consentSignature.length < 2) {
+            return res.status(400).json({ error: "Consent form must be signed" });
+        }
+        if (!signatureMatchesBookingName(consentSignature, customerName)) {
+            return res.status(400).json({ error: "Consent signature must match booking name" });
+        }
+
         const tierInfo = WAX_PASS_TIERS[tierNum];
         const allowedIds = getWaxPassServiceIds(tierNum);
         if (!serviceId || !allowedIds.includes(serviceId)) {
@@ -3496,7 +3636,12 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
         const passId = Number(req.params.passId);
         if (!Number.isInteger(passId)) return res.status(400).json({ error: "Invalid pass ID" });
         const clientId = req.clientAuth.clientId || req.clientAuth.id;
-        const { date, time, timezone, phone } = req.body || {};
+        const { date, time, timezone, phone, consent } = req.body || {};
+        const consentAccepted = consent?.accepted === true;
+        const consentSignature = String(consent?.signature || "").trim();
+        if (!consentAccepted || consentSignature.length < 2) {
+            return res.status(400).json({ error: "Consent form must be signed" });
+        }
         if (!isValidDate(date) || !isValidTime(time)) {
             return res.status(400).json({ error: "Valid date and time are required" });
         }
@@ -3514,6 +3659,9 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
             const pass = passRows.rows[0];
             if (pass.status !== "active") {
                 const e = new Error("Wax pass is not active"); e.statusCode = 400; throw e;
+            }
+            if (!signatureMatchesBookingName(consentSignature, pass.name)) {
+                const e = new Error("Consent signature must match booking name"); e.statusCode = 400; throw e;
             }
             const remainingCredits = pass.total_credits - pass.used_credits;
             if (remainingCredits <= 0) {
@@ -3587,6 +3735,20 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
         } catch (mailErr) {
             console.error("Wax pass booking email error:", mailErr);
         }
+
+        sendInternalBookingNotification({
+            source: "wax-pass-booking",
+            appointmentId: bookingResult.appointmentId,
+            date: bookingResult.date,
+            time: bookingResult.time,
+            name: bookingResult.name,
+            email: bookingResult.email,
+            phone: phone || "",
+            services: [{ name: bookingResult.serviceName }],
+            consentSignature
+        }).catch((e) => {
+            console.error("Internal booking notify error:", e);
+        });
 
         res.json({
             success: true,

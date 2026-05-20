@@ -45,10 +45,22 @@
     </section>
 
     <div id="admin-dashboard" class="admin-dashboard" hidden>
-        <section class="calendar-booking">
+        <nav class="admin-section-nav" aria-label="Admin sections">
+            <div class="admin-section-control">
+                <label for="admin-section-select" class="admin-section-select-label">Select Section:</label>
+                <select id="admin-section-select" class="admin-section-select" aria-label="Select admin section">
+                    <option value="appointments">Appointments</option>
+                    <option value="clients">Clients</option>
+                    <option value="reports">Reports &amp; Analytics</option>
+                    <option value="finance">Revenue &amp; Expenses</option>
+                </select>
+            </div>
+            <button type="button" id="admin-logout" class="admin-menu-logout-btn">Sign Out</button>
+        </nav>
+
+        <section class="calendar-booking" id="admin-appointments" data-admin-section="appointments">
             <h3>Appointments</h3>
             <p id="dashboard-message" class="form-message admin-dashboard-message" role="status" aria-live="polite"></p>
-            <button id="admin-logout" type="button" class="cart-remove-btn admin-logout-btn">Sign Out</button>
 
             <h4>Upcoming Appointments</h4>
             <div class="table-wrapper admin-table-wrapper">
@@ -114,7 +126,26 @@
             </div>
         </section>
 
-        <section class="calendar-booking admin-reports" id="admin-reports" hidden>
+        <section class="calendar-booking admin-clients" id="admin-clients" data-admin-section="clients">
+            <h3>Clients</h3>
+
+            <div class="table-wrapper admin-table-wrapper">
+                <table id="clients-table" class="admin-table">
+                    <caption>Client contact list</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Last Name</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Phone Number</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="calendar-booking admin-reports" id="admin-reports" data-admin-section="reports">
             <h3>Reports & Analytics</h3>
             <form id="analytics-filter" class="analytics-filter" novalidate>
                 <div class="field-group">
@@ -197,7 +228,7 @@
             </div>
         </section>
 
-        <section class="calendar-booking admin-finance" id="admin-finance" hidden>
+        <section class="calendar-booking admin-finance" id="admin-finance" data-admin-section="finance">
             <h3>Revenue & Expenses</h3>
             <div class="analytics-cards" id="finance-cards">
                 <article class="analytics-card">

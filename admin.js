@@ -6,10 +6,14 @@ const loginSection = document.getElementById("admin-login-section");
 const dashboardSection = document.getElementById("admin-dashboard");
 const adminMessage = document.getElementById("admin-message");
 const dashboardMessage = document.getElementById("dashboard-message");
+const appointmentsSection = document.getElementById("admin-appointments");
 const appointmentsTableBody = document.querySelector("#appointments-table tbody");
 const pastAppointmentsTableBody = document.querySelector("#past-appointments-table tbody");
+const clientsSection = document.getElementById("admin-clients");
+const clientsTableBody = document.querySelector("#clients-table tbody");
 const reportsSection = document.getElementById("admin-reports");
 const financeSection = document.getElementById("admin-finance");
+const adminSectionSelect = document.getElementById("admin-section-select");
 const analyticsFilterForm = document.getElementById("analytics-filter");
 const analyticsStartInput = document.getElementById("analytics-start");
 const analyticsEndInput = document.getElementById("analytics-end");
@@ -54,6 +58,7 @@ let expenseUndoTimer = null;
 const ADMIN_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 let adminIdleLogoutTimer = null;
 let adminActivityTrackingBound = false;
+let activeAdminSection = "appointments";
 
 function ensureLocalAdminNodeOrigin() {
     const isHttp = window.location.protocol === "http:" || window.location.protocol === "https:";
@@ -132,6 +137,30 @@ function setAdminMessage(message) {
     }
 }
 
+function setActiveAdminSection(sectionName) {
+    const sectionMap = {
+        appointments: appointmentsSection,
+        clients: clientsSection,
+        reports: reportsSection,
+        finance: financeSection
+    };
+
+    const nextSection = sectionMap[sectionName] ? sectionName : "appointments";
+    activeAdminSection = nextSection;
+
+    Object.entries(sectionMap).forEach(([name, sectionElement]) => {
+        if (!sectionElement) {
+            return;
+        }
+
+        sectionElement.hidden = name !== nextSection;
+    });
+
+    if (adminSectionSelect) {
+        adminSectionSelect.value = nextSection;
+    }
+}
+
 function dismissExpenseUndoToast() {
     if (expenseUndoTimer) {
         clearTimeout(expenseUndoTimer);
@@ -207,6 +236,10 @@ function setAuthenticatedLayout(isAuthenticated) {
         dashboardSection.hidden = !isAuthenticated;
     }
 
+    if (isAuthenticated) {
+        setActiveAdminSection(activeAdminSection);
+    }
+
     if (isAuthenticated && adminMessage) {
         adminMessage.textContent = "";
     }
@@ -229,21 +262,21 @@ function stopAdminIdleLogoutTimer() {
     }
 }
 
-async function performAdminSignOut(message = "Signed out.") {
+async function performAdminSignOut(message = "Signed out.", redirectToLogin = false) {
     renderAppointments([]);
+    renderClients([]);
     renderAnalytics({});
     renderFinance({});
     closeAdminReschedulePanel();
     dismissExpenseUndoToast();
     setAuthenticatedLayout(false);
     pastAppointmentsExpanded = false;
-    if (reportsSection) {
-        reportsSection.hidden = true;
-    }
-    if (financeSection) {
-        financeSection.hidden = true;
-    }
+    setActiveAdminSection("appointments");
     setAdminMessage(message);
+
+    if (redirectToLogin) {
+        window.location.assign("admin-login.html");
+    }
 }
 
 async function handleAdminIdleTimeout() {
@@ -258,7 +291,7 @@ async function handleAdminIdleTimeout() {
     } catch (error) {
     }
 
-    await performAdminSignOut("Signed out due to inactivity.");
+    await performAdminSignOut("Signed out due to inactivity.", true);
 }
 
 function resetAdminIdleLogoutTimer() {
@@ -1062,6 +1095,54 @@ function renderFinance(finance) {
     });
 }
 
+function renderClients(appointments) {
+    if (!clientsTableBody) {
+        return;
+    }
+
+    clientsTableBody.innerHTML = "";
+
+    const rows = Array.isArray(appointments) ? appointments : [];
+    const uniqueClients = [];
+    const seenEmails = new Set();
+
+    rows.forEach((appointment) => {
+        const email = String(appointment?.email || "").trim().toLowerCase();
+        if (!email || seenEmails.has(email)) {
+            return;
+        }
+
+        seenEmails.add(email);
+        uniqueClients.push({
+            name: String(appointment?.name || "").trim(),
+            email: String(appointment?.email || "").trim(),
+            phone: String(appointment?.phone || "").trim()
+        });
+    });
+
+    if (uniqueClients.length === 0) {
+        const row = document.createElement("tr");
+        row.innerHTML = '<td colspan="4">No clients found.</td>';
+        clientsTableBody.appendChild(row);
+        return;
+    }
+
+    uniqueClients.forEach((client) => {
+        const fullName = String(client.name || "").trim();
+        const [firstName = "", ...lastNameParts] = fullName.split(/\s+/).filter(Boolean);
+        const lastName = lastNameParts.join(" ");
+
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${escapeHtml(firstName || "-")}</td>
+            <td>${escapeHtml(lastName || "-")}</td>
+            <td>${escapeHtml(client.email || "-")}</td>
+            <td>${escapeHtml(client.phone || "-")}</td>
+        `;
+        clientsTableBody.appendChild(row);
+    });
+}
+
 function renderDailyAnalytics(dailyRows) {
     dailyAnalyticsBody.innerHTML = "";
 
@@ -1135,6 +1216,7 @@ function renderAnalytics(analytics) {
 async function loadAppointments() {
     const appointments = await fetchAdminJson("/api/admin/appointments");
     renderAppointments(appointments);
+    renderClients(appointments);
 }
 
 adminRescheduleDateInput?.addEventListener("change", () => {
@@ -1204,14 +1286,7 @@ async function loadFinance() {
 
 async function loadDashboard() {
     await Promise.all([loadAppointments(), loadAnalytics(), loadFinance()]);
-
-    if (reportsSection) {
-        reportsSection.hidden = false;
-    }
-
-    if (financeSection) {
-        financeSection.hidden = false;
-    }
+    setActiveAdminSection(activeAdminSection);
 }
 
 async function restoreAdminSession() {
@@ -1220,15 +1295,10 @@ async function restoreAdminSession() {
         setAuthenticatedLayout(true);
         setAdminMessage("Loading dashboard...");
         await loadDashboard();
-        setAdminMessage("Dashboard loaded.");
+        setAdminMessage("");
     } catch (error) {
         setAuthenticatedLayout(false);
-        if (reportsSection) {
-            reportsSection.hidden = true;
-        }
-        if (financeSection) {
-            financeSection.hidden = true;
-        }
+        setActiveAdminSection("appointments");
     }
 }
 
@@ -1253,20 +1323,26 @@ loginForm.addEventListener("submit", async (event) => {
         await loadDashboard();
         setAuthenticatedLayout(true);
         adminPassInput.value = "";
-        setAdminMessage("Dashboard loaded.");
+        setAdminMessage("");
     } catch (error) {
         setAuthenticatedLayout(false);
         setAdminMessage(error.message || "Unable to load dashboard");
         renderAppointments([]);
         renderAnalytics({});
         renderFinance({});
-        if (reportsSection) {
-            reportsSection.hidden = true;
-        }
-        if (financeSection) {
-            financeSection.hidden = true;
-        }
+        setActiveAdminSection("appointments");
     }
+});
+
+adminSectionSelect?.addEventListener("change", () => {
+    if (!isAdminAuthenticated) {
+        setAdminMessage("Sign in to view admin sections.");
+        adminSectionSelect.value = activeAdminSection;
+        return;
+    }
+
+    const sectionName = adminSectionSelect.value || "appointments";
+    setActiveAdminSection(sectionName);
 });
 
 analyticsFilterForm?.addEventListener("submit", async (event) => {
@@ -1346,11 +1422,12 @@ adminLogoutButton?.addEventListener("click", async () => {
         // Ignore logout failures and still clear the UI state.
     }
 
-    await performAdminSignOut("Signed out.");
+    await performAdminSignOut("Signed out.", true);
 });
 
 setDefaultDateRange();
 setAuthenticatedLayout(false);
+setActiveAdminSection("appointments");
 bindAdminActivityTracking();
 
 if (expenseDateInput) {
