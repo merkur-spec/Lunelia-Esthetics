@@ -484,7 +484,7 @@ function formatServicesForEmail(services) {
     }
 
     return services
-        .map((service) => String(service?.name || service?.id || "Service").trim())
+        .map((service) => escapeHtml(String(service?.name || service?.id || "Service").trim()))
         .filter(Boolean)
         .join(", ");
 }
@@ -521,7 +521,7 @@ async function sendInternalBookingNotification(details = {}) {
               timeZoneName: "short"
           });
     const consentSignature = String(details.consentSignature || "").trim();
-    const services = escapeHtml(formatServicesForEmail(details.services));
+    const services = formatServicesForEmail(details.services);
     const totalPaidCents = Number(details.totalPaidCents);
     const amountLine = Number.isFinite(totalPaidCents)
         ? `<p><strong>Amount:</strong> $${(Math.max(0, totalPaidCents) / 100).toFixed(2)}</p>`
@@ -2313,7 +2313,7 @@ app.post(WEBHOOK_PATH, express.raw({ type: "application/json" }), async (req, re
                                     <h3>Pass Details</h3>
                                     <p><strong>Service:</strong> ${escapeHtml(serviceName)}</p>
                                     <p><strong>Pass Tier:</strong> ${escapeHtml(tierLabel)}</p>
-                                    <p><strong>Credits Included:</strong> ${Number(totalCredits)}</p>
+                                    <p><strong>Credits Included:</strong> ${escapeHtml(String(totalCredits))}</p>
                                     <p><strong>Amount Paid:</strong> $${amountPaid}</p>
 
                                     <p>You can book your appointments using your Wax Pass credits by signing into your client portal.</p>
@@ -3736,7 +3736,7 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
                        <p><strong>Cancellation Policy:</strong> Cancel more than 24 hours before your appointment to have
                        your wax pass credit returned. If you are late or no-show for an appointment booked with a wax
                        pass, that wax pass credit is considered spent and is non-refundable.</p>
-                       <p>You have <strong>${Number(bookingResult.remainingAfter)}</strong> credit(s) remaining on this pass.</p>
+                       <p>You have <strong>${escapeHtml(String(bookingResult.remainingAfter))}</strong> credit(s) remaining on this pass.</p>
                        <p>Thank you!</p>`
             });
         } catch (mailErr) {
