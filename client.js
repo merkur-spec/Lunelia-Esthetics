@@ -17,6 +17,15 @@ const rescheduleCancelButton = document.getElementById("client-reschedule-cancel
 const rescheduleTarget = document.getElementById("client-reschedule-target");
 const rescheduleMessage = document.getElementById("client-reschedule-message");
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;");
+}
+
 function formatStatus(status) {
     const map = {
         confirmed: "Confirmed",
@@ -26,7 +35,7 @@ function formatStatus(status) {
         completed: "Completed"
     };
     const key = String(status || "").toLowerCase();
-    return map[key] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : "-");
+    return map[key] || (status ? escapeHtml(status.charAt(0).toUpperCase() + status.slice(1)) : "-");
 }
 
 const API_BASES = (() => {
@@ -58,14 +67,14 @@ function getWaxPassTierLabel(tier) {
         2: "Tier 2 (Buy 7, Get 2)",
         3: "Tier 3 (Buy 9, Get 3)"
     };
-    return map[Number(tier)] || `Tier ${tier}`;
+    return map[Number(tier)] || escapeHtml(`Tier ${tier}`);
 }
 
 function getWaxPassStatusLabel(status) {
     const normalized = String(status || "").toLowerCase();
     if (normalized === "active") return "Active";
     if (normalized === "completed") return "Completed";
-    return status ? status.charAt(0).toUpperCase() + status.slice(1) : "-";
+    return status ? escapeHtml(status.charAt(0).toUpperCase() + status.slice(1)) : "-";
 }
 
 function getCookie(name) {
@@ -546,9 +555,9 @@ async function loadAppointments() {
         appointments.forEach((appointment) => {
             const row = document.createElement("tr");
             row.innerHTML = `
-                <td data-label="Date">${appointment.date || "-"}</td>
-                <td data-label="Time">${appointment.time || "-"}</td>
-                <td data-label="Services">${parseServices(appointment.services) || "-"}</td>
+                <td data-label="Date">${escapeHtml(appointment.date || "-")}</td>
+                <td data-label="Time">${escapeHtml(appointment.time || "-")}</td>
+                <td data-label="Services">${escapeHtml(parseServices(appointment.services) || "-")}</td>
                 <td data-label="Status">${formatStatus(appointment.status)}</td>
                 <td data-label="Action"></td>
             `;
@@ -639,9 +648,9 @@ async function loadAppointments() {
     visiblePastAppointments.forEach((appointment) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-            <td data-label="Date">${appointment.date || "-"}</td>
-            <td data-label="Time">${appointment.time || "-"}</td>
-            <td data-label="Services">${parseServices(appointment.services) || "-"}</td>
+            <td data-label="Date">${escapeHtml(appointment.date || "-")}</td>
+            <td data-label="Time">${escapeHtml(appointment.time || "-")}</td>
+            <td data-label="Services">${escapeHtml(parseServices(appointment.services) || "-")}</td>
             <td data-label="Status">${formatStatus(appointment.status)}</td>
         `;
         pastAppointmentsBody.appendChild(row);
@@ -680,7 +689,7 @@ async function loadWaxPasses() {
 
         const row = document.createElement("tr");
         row.innerHTML = `
-            <td data-label="Service">${waxPass.service_name || "-"}</td>
+            <td data-label="Service">${escapeHtml(waxPass.service_name || "-")}</td>
             <td data-label="Tier">${getWaxPassTierLabel(waxPass.tier)}</td>
             <td data-label="Credits">${usedCredits}/${totalCredits}</td>
             <td data-label="Status">${getWaxPassStatusLabel(waxPass.status)}</td>

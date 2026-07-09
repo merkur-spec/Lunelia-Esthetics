@@ -1,31 +1,8 @@
 const queryParams = new URLSearchParams(window.location.search);
 
-function normalizeApiBase(value) {
-    if (!value) {
-        return "";
-    }
-
-    try {
-        const parsed = new URL(value);
-        if (!["http:", "https:"].includes(parsed.protocol)) {
-            return "";
-        }
-
-        return `${parsed.protocol}//${parsed.host}`;
-    } catch (error) {
-        return "";
-    }
-}
-
-const API_BASE_FROM_LINK = normalizeApiBase((queryParams.get("api") || "").trim());
-
 const API_BASES = (() => {
     const bases = [];
     const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-
-    if (API_BASE_FROM_LINK) {
-        bases.push(API_BASE_FROM_LINK);
-    }
 
     if (isLocal) {
         [

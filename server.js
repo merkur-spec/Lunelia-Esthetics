@@ -50,6 +50,15 @@ function sendInternalError(res, logLabel, error) {
     return res.status(500).json({ error: "Internal server error" });
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;");
+}
+
 function parsePositiveIntEnv(name, fallback) {
     const raw = String(process.env[name] || "").trim();
 
@@ -188,7 +197,7 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl:
         process.env.DB_SSL === "true"
-            ? { rejectUnauthorized: false }
+            ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" }
             : undefined
 });
 
@@ -475,7 +484,7 @@ function formatServicesForEmail(services) {
     }
 
     return services
-        .map((service) => String(service?.name || service?.id || "Service").trim())
+        .map((service) => escapeHtml(String(service?.name || service?.id || "Service").trim()))
         .filter(Boolean)
         .join(", ");
 }
@@ -520,24 +529,24 @@ async function sendInternalBookingNotification(details = {}) {
     const consentLine = consentSignature
         ? `
             <p><strong>Signed Consent Form:</strong> Yes</p>
-            <p><strong>Consent Signature:</strong> ${consentSignature}</p>
+            <p><strong>Consent Signature:</strong> ${escapeHtml(consentSignature)}</p>
           `
         : `<p><strong>Signed Consent Form:</strong> No signature captured</p>`;
 
     await transporter.sendMail({
         from: inbox,
         to: inbox,
-        subject: `New Booking Received (${source})`,
+        subject: `New Booking Received (${escapeHtml(source)})`,
         html: `
             <h2>New Booking Received</h2>
-            <p><strong>Appointment ID:</strong> ${appointmentId}</p>
-            <p><strong>Booked At:</strong> ${bookedAt}</p>
-            <p><strong>Appointment Date:</strong> ${date}</p>
-            <p><strong>Appointment Time:</strong> ${time}</p>
-            <p><strong>Client First Name:</strong> ${firstName}</p>
-            <p><strong>Client Last Name:</strong> ${lastName}</p>
-            <p><strong>Email:</strong> ${clientEmail}</p>
-            <p><strong>Phone:</strong> ${clientPhone}</p>
+            <p><strong>Appointment ID:</strong> ${escapeHtml(String(appointmentId))}</p>
+            <p><strong>Booked At:</strong> ${escapeHtml(bookedAt)}</p>
+            <p><strong>Appointment Date:</strong> ${escapeHtml(date)}</p>
+            <p><strong>Appointment Time:</strong> ${escapeHtml(time)}</p>
+            <p><strong>Client First Name:</strong> ${escapeHtml(firstName)}</p>
+            <p><strong>Client Last Name:</strong> ${escapeHtml(lastName)}</p>
+            <p><strong>Email:</strong> ${escapeHtml(clientEmail)}</p>
+            <p><strong>Phone:</strong> ${escapeHtml(clientPhone)}</p>
             <p><strong>Service(s) Booked:</strong> ${services}</p>
             ${amountLine}
             ${consentLine}
@@ -1822,13 +1831,13 @@ app.post("/api/free-booking", async (req, res) => {
                 from: process.env.EMAIL_USER,
                 to: customerEmail,
                 subject: "Booking Confirmation - Lunelia Esthetics",
-                html: `
+                    html: `
                     <h2>Your Booking is Confirmed!</h2>
-                    <p>Hi ${customerName || "Valued Client"},</p>
+                    <p>Hi ${escapeHtml(customerName) || "Valued Client"},</p>
                     <p>Your promotional reward has been applied — this appointment is on the house.</p>
-                    <p><strong>Date:</strong> ${date}</p>
-                    <p><strong>Time:</strong> ${time}</p>
-                    <p><strong>Services:</strong> ${sanitizedServices.map((s) => s.name).join(", ")}</p>
+                    <p><strong>Date:</strong> ${escapeHtml(date)}</p>
+                    <p><strong>Time:</strong> ${escapeHtml(time)}</p>
+                    <p><strong>Services:</strong> ${sanitizedServices.map((s) => escapeHtml(s.name)).join(", ")}</p>
                     <p>We look forward to seeing you!</p>
                     <p>Lunelia Esthetics</p>
                 `
@@ -2216,11 +2225,11 @@ app.post("/api/confirm-booking", async (req, res) => {
                     subject: "Booking Confirmation - Lunelia Esthetics",
                     html: `
                         <h2>Your Booking is Confirmed!</h2>
-                        <p>Hi ${appointmentName || "Valued Client"},</p>
+                        <p>Hi ${escapeHtml(appointmentName) || "Valued Client"},</p>
                         <p>Thank you for booking with Lunelia Esthetics. Here are your appointment details:</p>
-                        <p><strong>Date:</strong> ${date}</p>
-                        <p><strong>Time:</strong> ${time}</p>
-                        <p><strong>Services:</strong> ${servicesList.map((service) => service.name).join(", ")}</p>
+                        <p><strong>Date:</strong> ${escapeHtml(date)}</p>
+                        <p><strong>Time:</strong> ${escapeHtml(time)}</p>
+                        <p><strong>Services:</strong> ${servicesList.map((service) => escapeHtml(service.name)).join(", ")}</p>
                         <p><strong>Amount Paid:</strong> $${(session.amount_total / 100).toFixed(2)}</p>
 
                         <h3>Booking Policy</h3>
@@ -2298,13 +2307,13 @@ app.post(WEBHOOK_PATH, express.raw({ type: "application/json" }), async (req, re
                                 subject: "Wax Pass Purchase Confirmed - Lunelia Esthetics",
                                 html: `
                                     <h2>Your Wax Pass is Ready!</h2>
-                                    <p>Hi ${clientName},</p>
+                                    <p>Hi ${escapeHtml(clientName)},</p>
                                     <p>Thank you for purchasing a Wax Pass with Lunelia Esthetics. Your pass is now active and ready to use.</p>
 
                                     <h3>Pass Details</h3>
-                                    <p><strong>Service:</strong> ${serviceName}</p>
-                                    <p><strong>Pass Tier:</strong> ${tierLabel}</p>
-                                    <p><strong>Credits Included:</strong> ${totalCredits}</p>
+                                    <p><strong>Service:</strong> ${escapeHtml(serviceName)}</p>
+                                    <p><strong>Pass Tier:</strong> ${escapeHtml(tierLabel)}</p>
+                                    <p><strong>Credits Included:</strong> ${escapeHtml(String(totalCredits))}</p>
                                     <p><strong>Amount Paid:</strong> $${amountPaid}</p>
 
                                     <p>You can book your appointments using your Wax Pass credits by signing into your client portal.</p>
@@ -2342,8 +2351,7 @@ app.post("/api/client/register", async (req, res) => {
         const rawVerificationToken = crypto.randomBytes(32).toString("hex");
         const verificationTokenHash = hashResetToken(rawVerificationToken);
         const verificationExpiry = new Date(Date.now() + 1000 * 60 * 60 * 24);
-        const apiOrigin = `${req.protocol}://${req.get("host")}`;
-        const verifyLink = `${PUBLIC_APP_URL}/verify-email.html?token=${encodeURIComponent(rawVerificationToken)}&email=${encodeURIComponent(email)}&api=${encodeURIComponent(apiOrigin)}`;
+        const verifyLink = `${PUBLIC_APP_URL}/verify-email.html?token=${encodeURIComponent(rawVerificationToken)}&email=${encodeURIComponent(email)}`;
 
         if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
             return res.status(400).json({ error: "Valid email is required" });
@@ -2379,10 +2387,10 @@ app.post("/api/client/register", async (req, res) => {
                     subject: "Verify Your Lunelia Esthetics Account",
                     html: `
                         <h2>Welcome to Lunelia Esthetics</h2>
-                        <p>Hi ${client.name || "there"},</p>
+                        <p>Hi ${escapeHtml(client.name) || "there"},</p>
                         <p>Your client account has been created successfully.</p>
                         <p>Please verify your email before signing in.</p>
-                        <p><a href="${verifyLink}">Verify your email</a></p>
+                        <p><a href="${escapeHtml(verifyLink)}">Verify your email</a></p>
                     `
                 });
             } catch (emailError) {
@@ -2525,8 +2533,7 @@ app.post("/api/client/forgot-password", async (req, res) => {
             const rawToken = crypto.randomBytes(32).toString("hex");
             const tokenHash = hashResetToken(rawToken);
             const expiry = new Date(Date.now() + 60 * 60 * 1000);
-            const apiOrigin = `${req.protocol}://${req.get("host")}`;
-            const resetLink = `${PUBLIC_APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}&api=${encodeURIComponent(apiOrigin)}`;
+            const resetLink = `${PUBLIC_APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}`;
 
             if (!IS_PRODUCTION) {
                 debugResetLink = resetLink;
@@ -2545,9 +2552,9 @@ app.post("/api/client/forgot-password", async (req, res) => {
                         subject: "Reset Your Lunelia Esthetics Password",
                         html: `
                             <h2>Password Reset Request</h2>
-                            <p>Hi ${client.name || "there"},</p>
+                            <p>Hi ${escapeHtml(client.name) || "there"},</p>
                             <p>Use the link below to reset your password. This link expires in 1 hour.</p>
-                            <p><a href="${resetLink}">Reset Password</a></p>
+                            <p><a href="${escapeHtml(resetLink)}">Reset Password</a></p>
                         `
                     });
                 } catch (emailError) {
@@ -3723,13 +3730,13 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
                 from: process.env.EMAIL_FROM || `"Lunelia Aesthetics" <noreply@luneliaesthetics.com>`,
                 to: bookingResult.email,
                 subject: "Your Wax Pass Appointment is Confirmed!",
-                html: `<p>Hi ${bookingResult.name},</p>
-                       <p>Your wax pass appointment for <strong>${bookingResult.serviceName}</strong> on
-                       <strong>${bookingResult.date}</strong> at <strong>${bookingResult.time}</strong> is confirmed.</p>
+                html: `<p>Hi ${escapeHtml(bookingResult.name)},</p>
+                       <p>Your wax pass appointment for <strong>${escapeHtml(bookingResult.serviceName)}</strong> on
+                       <strong>${escapeHtml(bookingResult.date)}</strong> at <strong>${escapeHtml(bookingResult.time)}</strong> is confirmed.</p>
                        <p><strong>Cancellation Policy:</strong> Cancel more than 24 hours before your appointment to have
                        your wax pass credit returned. If you are late or no-show for an appointment booked with a wax
                        pass, that wax pass credit is considered spent and is non-refundable.</p>
-                       <p>You have <strong>${bookingResult.remainingAfter}</strong> credit(s) remaining on this pass.</p>
+                       <p>You have <strong>${escapeHtml(String(bookingResult.remainingAfter))}</strong> credit(s) remaining on this pass.</p>
                        <p>Thank you!</p>`
             });
         } catch (mailErr) {
