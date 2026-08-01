@@ -55,6 +55,68 @@ const ADMIN_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 let adminIdleLogoutTimer = null;
 let adminActivityTrackingBound = false;
 
+// DMV (DC/Maryland/Virginia) area codes used to surface local clients first
+const DMV_AREA_CODES = new Set(["202", "240", "301", "410", "443", "571", "703"]);
+
+let cachedAppointments = [];
+
+function isDMVPhone(phone) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    const areaCode = digits.length === 11 && digits[0] === "1" ? digits.slice(1, 4) : digits.slice(0, 3);
+    return areaCode.length === 3 && DMV_AREA_CODES.has(areaCode);
+}
+
+function downloadAppointmentsCSV(appointments, filename) {
+    const headers = ["Date", "Time", "Name", "Email", "Phone", "DMV", "Services", "Status"];
+    const rows = appointments.map((appointment) => {
+        const services = (() => {
+            try {
+                return JSON.parse(appointment.services || "[]")
+                    .map((service) => {
+                        if (typeof service === "string") {
+                            const name = getCatalogServiceName(service);
+                            return name || service.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                        }
+                        const name = String(service?.name || "").trim();
+                        if (name) return name;
+                        const id = String(service?.id || "").trim();
+                        if (!id) return "";
+                        return getCatalogServiceName(id) || id.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                    })
+                    .filter(Boolean)
+                    .join("; ");
+            } catch (_) {
+                return "";
+            }
+        })();
+
+        return [
+            appointment.date || "",
+            appointment.time || "",
+            appointment.name || "",
+            appointment.email || "",
+            appointment.phone || "",
+            isDMVPhone(appointment.phone) ? "Yes" : "No",
+            services,
+            appointment.status || ""
+        ];
+    });
+
+    const csvLines = [headers, ...rows].map((row) =>
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+    );
+    const csvContent = csvLines.join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
 function ensureLocalAdminNodeOrigin() {
     const isHttp = window.location.protocol === "http:" || window.location.protocol === "https:";
     const pathname = String(window.location.pathname || "");
@@ -801,6 +863,10 @@ function renderAppointments(appointments) {
     );
 
     upcomingAppointments.sort((left, right) => {
+        const leftDMV = isDMVPhone(left.phone) ? 0 : 1;
+        const rightDMV = isDMVPhone(right.phone) ? 0 : 1;
+        if (leftDMV !== rightDMV) return leftDMV - rightDMV;
+
         const leftTimestamp = getAppointmentTimestamp(left);
         const rightTimestamp = getAppointmentTimestamp(right);
 
@@ -820,6 +886,10 @@ function renderAppointments(appointments) {
     });
 
     pastAppointments.sort((left, right) => {
+        const leftDMV = isDMVPhone(left.phone) ? 0 : 1;
+        const rightDMV = isDMVPhone(right.phone) ? 0 : 1;
+        if (leftDMV !== rightDMV) return leftDMV - rightDMV;
+
         const leftTimestamp = getAppointmentTimestamp(left);
         const rightTimestamp = getAppointmentTimestamp(right);
 
@@ -894,7 +964,7 @@ function renderAppointments(appointments) {
             <td>${escapeHtml(appointment.time || "-")}</td>
             <td>${escapeHtml(appointment.name || "-")}</td>
             <td>${escapeHtml(appointment.email || "-")}</td>
-            <td>${escapeHtml(appointment.phone || "-")}</td>
+            <td>${escapeHtml(appointment.phone || "-")}${isDMVPhone(appointment.phone) ? ' <span class="dmv-badge" title="DMV area client">DMV</span>' : ""}</td>
             <td>${services || "-"}</td>
             <td>${escapeHtml(appointment.status || "-")}</td>
             <td></td>
@@ -1134,6 +1204,7 @@ function renderAnalytics(analytics) {
 
 async function loadAppointments() {
     const appointments = await fetchAdminJson("/api/admin/appointments");
+    cachedAppointments = Array.isArray(appointments) ? appointments : [];
     renderAppointments(appointments);
 }
 
@@ -1301,6 +1372,24 @@ pastAppointmentsToggleBtn?.addEventListener("click", async () => {
     } catch (error) {
         setAdminMessage(error.message || "Unable to refresh appointments");
     }
+});
+
+document.getElementById("export-upcoming-btn")?.addEventListener("click", () => {
+    const upcoming = cachedAppointments.filter((a) => isUpcomingAppointment(a));
+    if (upcoming.length === 0) {
+        setAdminMessage("No upcoming appointments to export.");
+        return;
+    }
+    downloadAppointmentsCSV(upcoming, "upcoming-appointments.csv");
+});
+
+document.getElementById("export-past-btn")?.addEventListener("click", () => {
+    const past = cachedAppointments.filter((a) => !isUpcomingAppointment(a));
+    if (past.length === 0) {
+        setAdminMessage("No past appointments to export.");
+        return;
+    }
+    downloadAppointmentsCSV(past, "past-appointments.csv");
 });
 
 expenseForm?.addEventListener("submit", async (event) => {

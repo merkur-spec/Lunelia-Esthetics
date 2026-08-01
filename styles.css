@@ -1370,6 +1370,30 @@ table {
     padding: 8px 14px;
 }
 
+.export-btn {
+    background: #2e7d4f;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+}
+
+.export-btn:hover {
+    background: #245f3c;
+}
+
+.dmv-badge {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 1px 5px;
+    background: #2e7d4f;
+    color: #fff;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    vertical-align: middle;
+    letter-spacing: 0.04em;
+}
+
 .booking-policy-note {
     margin-top: 10px;
     padding: 12px;
