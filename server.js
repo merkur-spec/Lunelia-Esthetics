@@ -493,6 +493,44 @@ const transporter = nodemailer.createTransport({
     socketTimeout: 30000
 });
 
+async function sendMailWithIPv4Fallback(mailOptions) {
+    try {
+        return await transporter.sendMail(mailOptions);
+    } catch (error) {
+        const message = String(error?.message || "");
+        const shouldRetryIPv4 = message.includes("ENETUNREACH") && /@gmail\.com$/i.test(EMAIL_USER);
+
+        if (!shouldRetryIPv4) {
+            throw error;
+        }
+
+        const smtpHost = "smtp.gmail.com";
+        const ipv4Addresses = await dns.promises.resolve4(smtpHost);
+
+        if (!Array.isArray(ipv4Addresses) || ipv4Addresses.length === 0) {
+            throw error;
+        }
+
+        const ipv4Transporter = nodemailer.createTransport({
+            host: ipv4Addresses[0],
+            port: 465,
+            secure: true,
+            auth: {
+                user: EMAIL_USER,
+                pass: EMAIL_PASS
+            },
+            tls: {
+                servername: smtpHost
+            },
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 30000
+        });
+
+        return ipv4Transporter.sendMail(mailOptions);
+    }
+}
+
 function hasEmailTransportCredentials() {
     return Boolean(EMAIL_USER) && Boolean(EMAIL_PASS);
 }
@@ -526,8 +564,8 @@ async function sendVerificationEmail(client, verifyLink) {
         throw new Error("Email transport is not configured");
     }
 
-    await transporter.sendMail({
-        from: process.env.EMAIL_USER,
+    await sendMailWithIPv4Fallback({
+        from: EMAIL_USER,
         to: client.email,
         subject: "Verify Your Lunelia Esthetics Account",
         html: `
