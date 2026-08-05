@@ -6,9 +6,14 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const nodemailer = require("nodemailer");
+const dns = require("dns");
 const path = require("path");
 const crypto = require("crypto");
 const { serviceData } = require("./serviceData");
+
+if (typeof dns.setDefaultResultOrder === "function") {
+    dns.setDefaultResultOrder("ipv4first");
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -482,6 +487,7 @@ const transporter = nodemailer.createTransport({
         user: EMAIL_USER,
         pass: EMAIL_PASS
     },
+    family: 4,
     connectionTimeout: 20000,
     greetingTimeout: 20000,
     socketTimeout: 30000
