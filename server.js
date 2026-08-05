@@ -6,6 +6,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const dns = require("dns");
 const path = require("path");
 const crypto = require("crypto");
@@ -489,7 +490,10 @@ const SMTP_PASS = /@gmail\.com$/i.test(SMTP_USER)
     ? RAW_SMTP_PASS.replace(/\s+/g, "")
     : RAW_SMTP_PASS;
 const EMAIL_FROM = String(process.env.EMAIL_FROM || SMTP_USER || EMAIL_USER).trim();
+const RESEND_API_KEY = String(process.env.RESEND_API_KEY || "").trim();
+const RESEND_FROM = String(process.env.RESEND_FROM || EMAIL_FROM || "onboarding@resend.dev").trim();
 const USE_CUSTOM_SMTP = Boolean(SMTP_HOST);
+const resendClient = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 // Setup email transporter (update with your email credentials)
 const transporter = USE_CUSTOM_SMTP
@@ -519,6 +523,21 @@ const transporter = USE_CUSTOM_SMTP
       });
 
 async function sendMailWithIPv4Fallback(mailOptions) {
+    if (resendClient) {
+        const resendResponse = await resendClient.emails.send({
+            from: String(mailOptions.from || RESEND_FROM || EMAIL_FROM || "onboarding@resend.dev").trim(),
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            html: mailOptions.html
+        });
+
+        if (resendResponse?.error) {
+            throw new Error(resendResponse.error?.message || "Resend email send failed");
+        }
+
+        return resendResponse;
+    }
+
     try {
         return await transporter.sendMail(mailOptions);
     } catch (error) {
@@ -558,6 +577,10 @@ async function sendMailWithIPv4Fallback(mailOptions) {
 }
 
 function hasEmailTransportCredentials() {
+    if (resendClient) {
+        return true;
+    }
+
     if (USE_CUSTOM_SMTP) {
         return Boolean(SMTP_HOST) && Boolean(SMTP_USER) && Boolean(SMTP_PASS);
     }
@@ -620,10 +643,9 @@ function formatServicesForEmail(services) {
 }
 
 async function sendInternalBookingNotification(details = {}) {
-    const inbox = String(process.env.EMAIL_USER || "").trim();
-    const password = String(process.env.EMAIL_PASS || "").trim();
+    const inbox = String(process.env.INTERNAL_NOTIFICATION_EMAIL || EMAIL_USER || SMTP_USER || "").trim();
 
-    if (!inbox || !password) {
+    if (!inbox || !hasEmailTransportCredentials()) {
         return;
     }
 
@@ -663,8 +685,8 @@ async function sendInternalBookingNotification(details = {}) {
           `
         : `<p><strong>Signed Consent Form:</strong> No signature captured</p>`;
 
-    await transporter.sendMail({
-        from: inbox,
+    await sendMailWithIPv4Fallback({
+        from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
         to: inbox,
         subject: `New Booking Received (${escapeHtml(source)})`,
         html: `
@@ -1956,9 +1978,9 @@ app.post("/api/free-booking", async (req, res) => {
         }).catch((e) => console.error("Internal booking notify error:", e));
 
         // Send confirmation email
-        if (customerEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-            transporter.sendMail({
-                from: process.env.EMAIL_USER,
+        if (customerEmail && hasEmailTransportCredentials()) {
+            sendMailWithIPv4Fallback({
+                from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
                 to: customerEmail,
                 subject: "Booking Confirmation - Lunelia Esthetics",
                     html: `
@@ -2347,10 +2369,9 @@ app.post("/api/confirm-booking", async (req, res) => {
             console.error("Internal booking notify error:", e);
         });
 
-        if (responsePayload.appointmentId && appointmentEmail && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-            transporter
-                .sendMail({
-                    from: process.env.EMAIL_USER,
+        if (responsePayload.appointmentId && appointmentEmail && hasEmailTransportCredentials()) {
+            sendMailWithIPv4Fallback({
+                    from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
                     to: appointmentEmail,
                     subject: "Booking Confirmation - Lunelia Esthetics",
                     html: `
@@ -2414,7 +2435,7 @@ app.post(WEBHOOK_PATH, express.raw({ type: "application/json" }), async (req, re
                 const waxPass = await finalizeWaxPassPurchaseFromSession(session);
 
                 // Send purchase confirmation email
-                if (waxPass && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+                if (waxPass && hasEmailTransportCredentials()) {
                     try {
                         const clientId = Number(session.metadata?.clientId || 0);
                         const clientRow = clientId
@@ -2431,8 +2452,8 @@ app.post(WEBHOOK_PATH, express.raw({ type: "application/json" }), async (req, re
                             const amountPaid = (Number(waxPass.price_paid_cents || session.amount_total || 0) / 100).toFixed(2);
                             const totalCredits = Number(waxPass.total_credits);
 
-                            await transporter.sendMail({
-                                from: process.env.EMAIL_USER,
+                            await sendMailWithIPv4Fallback({
+                                from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
                                 to: clientEmail,
                                 subject: "Wax Pass Purchase Confirmed - Lunelia Esthetics",
                                 html: `
@@ -2719,10 +2740,10 @@ app.post("/api/client/forgot-password", async (req, res) => {
                 [tokenHash, expiry, client.id]
             );
 
-            if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            if (hasEmailTransportCredentials()) {
                 try {
-                    await transporter.sendMail({
-                        from: process.env.EMAIL_USER,
+                    await sendMailWithIPv4Fallback({
+                        from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
                         to: email,
                         subject: "Reset Your Lunelia Esthetics Password",
                         html: `
@@ -3901,8 +3922,8 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
         });
 
         try {
-            await transporter.sendMail({
-                from: process.env.EMAIL_FROM || `"Lunelia Aesthetics" <noreply@luneliaesthetics.com>`,
+            await sendMailWithIPv4Fallback({
+                from: EMAIL_FROM || RESEND_FROM || `"Lunelia Aesthetics" <noreply@luneliaesthetics.com>`,
                 to: bookingResult.email,
                 subject: "Your Wax Pass Appointment is Confirmed!",
                 html: `<p>Hi ${escapeHtml(bookingResult.name)},</p>

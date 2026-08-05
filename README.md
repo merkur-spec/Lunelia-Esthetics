@@ -78,9 +78,17 @@ Then fill in your real values in [.env](.env).
 
 - `ADMIN_TOKEN_SECRET` — separate strong random secret for admin sessions
 - `STRIPE_WEBHOOK_SECRET` — needed for webhook-based Stripe flows
-- `EMAIL_USER` — sender account
-- `EMAIL_PASS` — app password or SMTP password
+- `RESEND_API_KEY` — Resend API key for production email delivery
+- `RESEND_FROM` — verified sender for Resend (or use `EMAIL_FROM`)
+- `SMTP_HOST` — SMTP host (optional alternative to Gmail)
+- `SMTP_PORT` — SMTP port (typically `587` or `465`)
+- `SMTP_SECURE` — `true` for TLS/465, `false` for STARTTLS/587
+- `SMTP_USER` — SMTP username/login
+- `SMTP_PASS` — SMTP password
+- `EMAIL_USER` — Gmail sender account (fallback/local option)
+- `EMAIL_PASS` — Gmail app password or fallback SMTP password
 - `EMAIL_FROM` — optional branded sender address
+- `INTERNAL_NOTIFICATION_EMAIL` — inbox for internal booking alerts
 - `PORT` — local or deployed server port
 - `NODE_ENV` — `production` outside local development
 - `DOMAIN` or `FRONTEND_URL` — public application URL
@@ -210,8 +218,9 @@ That is expected unless you already have a valid admin session.
 
 ### Emails are not sending
 
-- Verify `EMAIL_USER` and `EMAIL_PASS`
-- If using Gmail, use an app password
+- Preferred production setup: configure `RESEND_API_KEY` and `RESEND_FROM`
+- If using SMTP, verify `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASS`
+- If using Gmail fallback, verify `EMAIL_USER` and `EMAIL_PASS` (app password)
 - Check server logs for mail transport errors
 
 ### Stripe checkout is failing
