@@ -469,17 +469,26 @@ async function initializeDatabase() {
 // Initialize on startup
 initializeDatabase();
 
+const EMAIL_USER = String(process.env.EMAIL_USER || "").trim();
+const RAW_EMAIL_PASS = String(process.env.EMAIL_PASS || "").trim();
+const EMAIL_PASS = /@gmail\.com$/i.test(EMAIL_USER)
+    ? RAW_EMAIL_PASS.replace(/\s+/g, "")
+    : RAW_EMAIL_PASS;
+
 // Setup email transporter (update with your email credentials)
 const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
+    },
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000
 });
 
 function hasEmailTransportCredentials() {
-    return Boolean(String(process.env.EMAIL_USER || "").trim()) && Boolean(String(process.env.EMAIL_PASS || "").trim());
+    return Boolean(EMAIL_USER) && Boolean(EMAIL_PASS);
 }
 
 function buildVerificationLink(req, email, rawVerificationToken) {
