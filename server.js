@@ -479,26 +479,52 @@ const RAW_EMAIL_PASS = String(process.env.EMAIL_PASS || "").trim();
 const EMAIL_PASS = /@gmail\.com$/i.test(EMAIL_USER)
     ? RAW_EMAIL_PASS.replace(/\s+/g, "")
     : RAW_EMAIL_PASS;
+const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
+const SMTP_PORT = Number.parseInt(String(process.env.SMTP_PORT || "").trim(), 10) || 587;
+const SMTP_SECURE_ENV = String(process.env.SMTP_SECURE || "").trim().toLowerCase();
+const SMTP_SECURE = SMTP_SECURE_ENV ? SMTP_SECURE_ENV === "true" : SMTP_PORT === 465;
+const SMTP_USER = String(process.env.SMTP_USER || EMAIL_USER).trim();
+const RAW_SMTP_PASS = String(process.env.SMTP_PASS || EMAIL_PASS).trim();
+const SMTP_PASS = /@gmail\.com$/i.test(SMTP_USER)
+    ? RAW_SMTP_PASS.replace(/\s+/g, "")
+    : RAW_SMTP_PASS;
+const EMAIL_FROM = String(process.env.EMAIL_FROM || SMTP_USER || EMAIL_USER).trim();
+const USE_CUSTOM_SMTP = Boolean(SMTP_HOST);
 
 // Setup email transporter (update with your email credentials)
-const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        user: EMAIL_USER,
-        pass: EMAIL_PASS
-    },
-    family: 4,
-    connectionTimeout: 20000,
-    greetingTimeout: 20000,
-    socketTimeout: 30000
-});
+const transporter = USE_CUSTOM_SMTP
+    ? nodemailer.createTransport({
+          host: SMTP_HOST,
+          port: SMTP_PORT,
+          secure: SMTP_SECURE,
+          auth: {
+              user: SMTP_USER,
+              pass: SMTP_PASS
+          },
+          family: 4,
+          connectionTimeout: 20000,
+          greetingTimeout: 20000,
+          socketTimeout: 30000
+      })
+    : nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+              user: EMAIL_USER,
+              pass: EMAIL_PASS
+          },
+          family: 4,
+          connectionTimeout: 20000,
+          greetingTimeout: 20000,
+          socketTimeout: 30000
+      });
 
 async function sendMailWithIPv4Fallback(mailOptions) {
     try {
         return await transporter.sendMail(mailOptions);
     } catch (error) {
         const message = String(error?.message || "");
-        const shouldRetryIPv4 = message.includes("ENETUNREACH") && /@gmail\.com$/i.test(EMAIL_USER);
+        const shouldRetryIPv4 =
+            !USE_CUSTOM_SMTP && message.includes("ENETUNREACH") && /@gmail\.com$/i.test(EMAIL_USER);
 
         if (!shouldRetryIPv4) {
             throw error;
@@ -532,6 +558,10 @@ async function sendMailWithIPv4Fallback(mailOptions) {
 }
 
 function hasEmailTransportCredentials() {
+    if (USE_CUSTOM_SMTP) {
+        return Boolean(SMTP_HOST) && Boolean(SMTP_USER) && Boolean(SMTP_PASS);
+    }
+
     return Boolean(EMAIL_USER) && Boolean(EMAIL_PASS);
 }
 
@@ -565,7 +595,7 @@ async function sendVerificationEmail(client, verifyLink) {
     }
 
     await sendMailWithIPv4Fallback({
-        from: EMAIL_USER,
+        from: EMAIL_FROM || SMTP_USER || EMAIL_USER,
         to: client.email,
         subject: "Verify Your Lunelia Esthetics Account",
         html: `
