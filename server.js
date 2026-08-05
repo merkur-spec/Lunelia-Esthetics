@@ -478,6 +478,53 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+function hasEmailTransportCredentials() {
+    return Boolean(String(process.env.EMAIL_USER || "").trim()) && Boolean(String(process.env.EMAIL_PASS || "").trim());
+}
+
+function buildVerificationLink(req, email, rawVerificationToken) {
+    const apiOrigin = `${req.protocol}://${req.get("host")}`;
+    return `${PUBLIC_APP_URL}/verify-email.html?token=${encodeURIComponent(rawVerificationToken)}&email=${encodeURIComponent(email)}&api=${encodeURIComponent(apiOrigin)}`;
+}
+
+async function issueEmailVerificationToken(clientId) {
+    const rawVerificationToken = crypto.randomBytes(32).toString("hex");
+    const verificationTokenHash = hashResetToken(rawVerificationToken);
+    const verificationExpiry = new Date(Date.now() + 1000 * 60 * 60 * 24);
+
+    await pool.query(
+        `
+            UPDATE clients
+            SET email_verification_token_hash = $1,
+                email_verification_expires_at = $2,
+                email_verified = FALSE
+            WHERE id = $3
+        `,
+        [verificationTokenHash, verificationExpiry, clientId]
+    );
+
+    return rawVerificationToken;
+}
+
+async function sendVerificationEmail(client, verifyLink) {
+    if (!hasEmailTransportCredentials()) {
+        throw new Error("Email transport is not configured");
+    }
+
+    await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: client.email,
+        subject: "Verify Your Lunelia Esthetics Account",
+        html: `
+            <h2>Welcome to Lunelia Esthetics</h2>
+            <p>Hi ${client.name || "there"},</p>
+            <p>Your client account has been created successfully.</p>
+            <p>Please verify your email before signing in.</p>
+            <p><a href="${verifyLink}">Verify your email</a></p>
+        `
+    });
+}
+
 function formatServicesForEmail(services) {
     if (!Array.isArray(services) || services.length === 0) {
         return "-";
@@ -2348,10 +2395,6 @@ app.post("/api/client/register", async (req, res) => {
         const name = String(req.body?.name || "").trim();
         const email = normalizeEmail(req.body?.email || "");
         const password = String(req.body?.password || "");
-        const rawVerificationToken = crypto.randomBytes(32).toString("hex");
-        const verificationTokenHash = hashResetToken(rawVerificationToken);
-        const verificationExpiry = new Date(Date.now() + 1000 * 60 * 60 * 24);
-        const verifyLink = `${PUBLIC_APP_URL}/verify-email.html?token=${encodeURIComponent(rawVerificationToken)}&email=${encodeURIComponent(email)}`;
 
         if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
             return res.status(400).json({ error: "Valid email is required" });
@@ -2367,35 +2410,33 @@ app.post("/api/client/register", async (req, res) => {
                     name,
                     email,
                     password_hash,
-                    email_verified,
-                    email_verification_token_hash,
-                    email_verification_expires_at
+                    email_verified
                 )
-                VALUES ($1, $2, $3, FALSE, $4, $5)
+                VALUES ($1, $2, $3, FALSE)
                 RETURNING id, name, email
             `,
-            [name || null, email, hashPassword(password), verificationTokenHash, verificationExpiry]
+            [name || null, email, hashPassword(password)]
         );
 
         const client = result.rows[0];
+        let emailDispatchFailed = false;
 
-        if (client?.email && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+        if (client?.email) {
             try {
-                await transporter.sendMail({
-                    from: process.env.EMAIL_USER,
-                    to: client.email,
-                    subject: "Verify Your Lunelia Esthetics Account",
-                    html: `
-                        <h2>Welcome to Lunelia Esthetics</h2>
-                        <p>Hi ${escapeHtml(client.name) || "there"},</p>
-                        <p>Your client account has been created successfully.</p>
-                        <p>Please verify your email before signing in.</p>
-                        <p><a href="${escapeHtml(verifyLink)}">Verify your email</a></p>
-                    `
-                });
+                const rawVerificationToken = await issueEmailVerificationToken(client.id);
+                const verifyLink = buildVerificationLink(req, client.email, rawVerificationToken);
+                await sendVerificationEmail(client, verifyLink);
             } catch (emailError) {
                 console.error("Account email error:", emailError);
+                emailDispatchFailed = true;
             }
+        }
+
+        if (IS_PRODUCTION && emailDispatchFailed) {
+            return res.status(503).json({
+                error: "Account created, but we could not send a verification email. Please try signing in again to resend it.",
+                requiresVerification: true
+            });
         }
 
         const payload = {
@@ -2509,6 +2550,57 @@ app.post("/api/client/verify-email", async (req, res) => {
         });
     } catch (error) {
         return sendInternalError(res, "Client verify-email error:", error);
+    }
+});
+
+app.post("/api/client/resend-verification", async (req, res) => {
+    try {
+        const email = normalizeEmail(req.body?.email || "");
+
+        if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+            return res.status(400).json({ error: "Valid email is required" });
+        }
+
+        const result = await pool.query(
+            `
+                SELECT id, name, email, COALESCE(email_verified, FALSE) AS email_verified
+                FROM clients
+                WHERE LOWER(email) = LOWER($1)
+                LIMIT 1
+            `,
+            [email]
+        );
+
+        const client = result.rows[0] || null;
+
+        if (!client) {
+            return res.json({
+                success: true,
+                message: "If an account exists for this email, a verification email has been sent."
+            });
+        }
+
+        if (client.email_verified) {
+            return res.json({
+                success: true,
+                alreadyVerified: true,
+                message: "This account is already verified. You can sign in now."
+            });
+        }
+
+        const rawVerificationToken = await issueEmailVerificationToken(client.id);
+        const verifyLink = buildVerificationLink(req, client.email, rawVerificationToken);
+        await sendVerificationEmail(client, verifyLink);
+
+        return res.json({
+            success: true,
+            message: "Verification email sent. Please check your inbox."
+        });
+    } catch (error) {
+        console.error("Verification resend error:", error);
+        return res.status(503).json({
+            error: "Unable to send verification email right now. Please try again later."
+        });
     }
 });
 
