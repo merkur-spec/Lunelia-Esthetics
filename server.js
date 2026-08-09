@@ -5,16 +5,10 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const nodemailer = require("nodemailer");
-const { Resend } = require("resend");
-const dns = require("dns");
+const sgMail = require("@sendgrid/mail");
 const path = require("path");
 const crypto = require("crypto");
 const { serviceData } = require("./serviceData");
-
-if (typeof dns.setDefaultResultOrder === "function") {
-    dns.setDefaultResultOrder("ipv4first");
-}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -475,117 +469,34 @@ async function initializeDatabase() {
 // Initialize on startup
 initializeDatabase();
 
-const EMAIL_USER = String(process.env.EMAIL_USER || "").trim();
-const RAW_EMAIL_PASS = String(process.env.EMAIL_PASS || "").trim();
-const EMAIL_PASS = /@gmail\.com$/i.test(EMAIL_USER)
-    ? RAW_EMAIL_PASS.replace(/\s+/g, "")
-    : RAW_EMAIL_PASS;
-const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
-const SMTP_PORT = Number.parseInt(String(process.env.SMTP_PORT || "").trim(), 10) || 587;
-const SMTP_SECURE_ENV = String(process.env.SMTP_SECURE || "").trim().toLowerCase();
-const SMTP_SECURE = SMTP_SECURE_ENV ? SMTP_SECURE_ENV === "true" : SMTP_PORT === 465;
-const SMTP_USER = String(process.env.SMTP_USER || EMAIL_USER).trim();
-const RAW_SMTP_PASS = String(process.env.SMTP_PASS || EMAIL_PASS).trim();
-const SMTP_PASS = /@gmail\.com$/i.test(SMTP_USER)
-    ? RAW_SMTP_PASS.replace(/\s+/g, "")
-    : RAW_SMTP_PASS;
-const EMAIL_FROM = String(process.env.EMAIL_FROM || SMTP_USER || EMAIL_USER).trim();
-const RESEND_API_KEY = String(process.env.RESEND_API_KEY || "").trim();
-const RESEND_FROM = String(process.env.RESEND_FROM || EMAIL_FROM || "onboarding@resend.dev").trim();
-const USE_CUSTOM_SMTP = Boolean(SMTP_HOST);
-const resendClient = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+const SENDGRID_API_KEY = String(process.env.SENDGRID_API_KEY || "").trim();
+const EMAIL_FROM = String(process.env.EMAIL_FROM || "").trim();
 
-// Setup email transporter (update with your email credentials)
-const transporter = USE_CUSTOM_SMTP
-    ? nodemailer.createTransport({
-          host: SMTP_HOST,
-          port: SMTP_PORT,
-          secure: SMTP_SECURE,
-          auth: {
-              user: SMTP_USER,
-              pass: SMTP_PASS
-          },
-          family: 4,
-          connectionTimeout: 20000,
-          greetingTimeout: 20000,
-          socketTimeout: 30000
-      })
-    : nodemailer.createTransport({
-          service: "gmail",
-          auth: {
-              user: EMAIL_USER,
-              pass: EMAIL_PASS
-          },
-          family: 4,
-          connectionTimeout: 20000,
-          greetingTimeout: 20000,
-          socketTimeout: 30000
-      });
+if (SENDGRID_API_KEY) {
+    sgMail.setApiKey(SENDGRID_API_KEY);
+}
 
-async function sendMailWithIPv4Fallback(mailOptions) {
-    if (resendClient) {
-        const resendResponse = await resendClient.emails.send({
-            from: String(mailOptions.from || RESEND_FROM || EMAIL_FROM || "onboarding@resend.dev").trim(),
-            to: mailOptions.to,
-            subject: mailOptions.subject,
-            html: mailOptions.html
-        });
-
-        if (resendResponse?.error) {
-            throw new Error(resendResponse.error?.message || "Resend email send failed");
-        }
-
-        return resendResponse;
+async function sendMailWithSendGrid(mailOptions) {
+    if (!SENDGRID_API_KEY || !EMAIL_FROM) {
+        throw new Error("SendGrid email transport is not configured");
     }
 
-    try {
-        return await transporter.sendMail(mailOptions);
-    } catch (error) {
-        const message = String(error?.message || "");
-        const shouldRetryIPv4 =
-            !USE_CUSTOM_SMTP && message.includes("ENETUNREACH") && /@gmail\.com$/i.test(EMAIL_USER);
+    const payload = {
+        to: mailOptions.to,
+        from: String(mailOptions.from || EMAIL_FROM).trim(),
+        subject: String(mailOptions.subject || "").replace(/\r?\n/g, " "),
+        html: String(mailOptions.html || "").trim()
+    };
 
-        if (!shouldRetryIPv4) {
-            throw error;
-        }
-
-        const smtpHost = "smtp.gmail.com";
-        const ipv4Addresses = await dns.promises.resolve4(smtpHost);
-
-        if (!Array.isArray(ipv4Addresses) || ipv4Addresses.length === 0) {
-            throw error;
-        }
-
-        const ipv4Transporter = nodemailer.createTransport({
-            host: ipv4Addresses[0],
-            port: 465,
-            secure: true,
-            auth: {
-                user: EMAIL_USER,
-                pass: EMAIL_PASS
-            },
-            tls: {
-                servername: smtpHost
-            },
-            connectionTimeout: 20000,
-            greetingTimeout: 20000,
-            socketTimeout: 30000
-        });
-
-        return ipv4Transporter.sendMail(mailOptions);
+    if (mailOptions.text) {
+        payload.text = String(mailOptions.text);
     }
+
+    return sgMail.send(payload);
 }
 
 function hasEmailTransportCredentials() {
-    if (resendClient) {
-        return true;
-    }
-
-    if (USE_CUSTOM_SMTP) {
-        return Boolean(SMTP_HOST) && Boolean(SMTP_USER) && Boolean(SMTP_PASS);
-    }
-
-    return Boolean(EMAIL_USER) && Boolean(EMAIL_PASS);
+    return Boolean(SENDGRID_API_KEY) && Boolean(EMAIL_FROM);
 }
 
 function buildVerificationLink(req, email, rawVerificationToken) {
@@ -617,8 +528,8 @@ async function sendVerificationEmail(client, verifyLink) {
         throw new Error("Email transport is not configured");
     }
 
-    await sendMailWithIPv4Fallback({
-        from: EMAIL_FROM || SMTP_USER || EMAIL_USER,
+    await sendMailWithSendGrid({
+        from: EMAIL_FROM,
         to: client.email,
         subject: "Verify Your Lunelia Esthetics Account",
         html: `
@@ -643,7 +554,7 @@ function formatServicesForEmail(services) {
 }
 
 async function sendInternalBookingNotification(details = {}) {
-    const inbox = String(process.env.INTERNAL_NOTIFICATION_EMAIL || EMAIL_USER || SMTP_USER || "").trim();
+    const inbox = String(process.env.INTERNAL_NOTIFICATION_EMAIL || "").trim();
 
     if (!inbox || !hasEmailTransportCredentials()) {
         return;
@@ -685,8 +596,8 @@ async function sendInternalBookingNotification(details = {}) {
           `
         : `<p><strong>Signed Consent Form:</strong> No signature captured</p>`;
 
-    await sendMailWithIPv4Fallback({
-        from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
+    await sendMailWithSendGrid({
+        from: EMAIL_FROM,
         to: inbox,
         subject: `New Booking Received (${escapeHtml(source)})`,
         html: `
@@ -1979,8 +1890,8 @@ app.post("/api/free-booking", async (req, res) => {
 
         // Send confirmation email
         if (customerEmail && hasEmailTransportCredentials()) {
-            sendMailWithIPv4Fallback({
-                from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
+            sendMailWithSendGrid({
+                from: EMAIL_FROM,
                 to: customerEmail,
                 subject: "Booking Confirmation - Lunelia Esthetics",
                     html: `
@@ -2093,8 +2004,8 @@ app.post("/api/create-payment-intent", async (req, res) => {
             `
                 SELECT id
                 FROM appointments
-                                WHERE date = $1
-                                    AND status IN ('confirmed', 'late')
+                WHERE date = $1
+                  AND status IN ('confirmed', 'late')
                   AND time < ($2::time + make_interval(mins => $3::int))
                   AND $2::time < (time + make_interval(mins => COALESCE(duration_minutes, 30)::int))
                 LIMIT 1
@@ -2149,7 +2060,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
                 services: JSON.stringify(sanitizedServices),
                 name: customerName,
                 email: customerEmail,
-                phone: customerPhone,
+                               phone: customerPhone,
                 referralEmail: appliedReferralEmail,
                 timezone,
                 consentAccepted: String(consentAccepted),
@@ -2370,8 +2281,8 @@ app.post("/api/confirm-booking", async (req, res) => {
         });
 
         if (responsePayload.appointmentId && appointmentEmail && hasEmailTransportCredentials()) {
-            sendMailWithIPv4Fallback({
-                    from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
+            sendMailWithSendGrid({
+                    from: EMAIL_FROM,
                     to: appointmentEmail,
                     subject: "Booking Confirmation - Lunelia Esthetics",
                     html: `
@@ -2452,8 +2363,8 @@ app.post(WEBHOOK_PATH, express.raw({ type: "application/json" }), async (req, re
                             const amountPaid = (Number(waxPass.price_paid_cents || session.amount_total || 0) / 100).toFixed(2);
                             const totalCredits = Number(waxPass.total_credits);
 
-                            await sendMailWithIPv4Fallback({
-                                from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
+                            await sendMailWithSendGrid({
+                                from: EMAIL_FROM,
                                 to: clientEmail,
                                 subject: "Wax Pass Purchase Confirmed - Lunelia Esthetics",
                                 html: `
@@ -2742,8 +2653,8 @@ app.post("/api/client/forgot-password", async (req, res) => {
 
             if (hasEmailTransportCredentials()) {
                 try {
-                    await sendMailWithIPv4Fallback({
-                        from: EMAIL_FROM || RESEND_FROM || SMTP_USER || EMAIL_USER,
+                    await sendMailWithSendGrid({
+                        from: EMAIL_FROM,
                         to: email,
                         subject: "Reset Your Lunelia Esthetics Password",
                         html: `
@@ -3922,8 +3833,8 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
         });
 
         try {
-            await sendMailWithIPv4Fallback({
-                from: EMAIL_FROM || RESEND_FROM || `"Lunelia Aesthetics" <noreply@luneliaesthetics.com>`,
+            await sendMailWithSendGrid({
+                from: EMAIL_FROM,
                 to: bookingResult.email,
                 subject: "Your Wax Pass Appointment is Confirmed!",
                 html: `<p>Hi ${escapeHtml(bookingResult.name)},</p>
