@@ -14,6 +14,7 @@ function setStatus(title, message) {
     const params = new URLSearchParams(window.location.search);
     const token = String(params.get("token") || "").trim();
     const email = String(params.get("email") || "").trim();
+    const apiBase = String(params.get("api") || window.location.origin).trim().replace(/\/+$/, "");
 
     if (!token) {
         setStatus("Unable to verify email", "This verification link is missing a token.");
@@ -21,7 +22,7 @@ function setStatus(title, message) {
     }
 
     try {
-        const response = await fetch("/api/client/verify-email", {
+        const response = await fetch(`${apiBase}/api/client/verify-email`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ token, email })

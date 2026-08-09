@@ -499,9 +499,23 @@ function hasEmailTransportCredentials() {
     return Boolean(SENDGRID_API_KEY) && Boolean(EMAIL_FROM);
 }
 
+function resolveEmailAppOrigin(req) {
+    const apiOrigin = `${req.protocol}://${req.get("host")}`;
+    const appOriginLooksLocalhost = /localhost|127\.0\.0\.1/i.test(PUBLIC_APP_URL);
+    const apiOriginLooksPublic = !/localhost|127\.0\.0\.1/i.test(apiOrigin);
+
+    if (appOriginLooksLocalhost && apiOriginLooksPublic) {
+        return apiOrigin;
+    }
+
+    return PUBLIC_APP_URL;
+}
+
 function buildVerificationLink(req, email, rawVerificationToken) {
     const apiOrigin = `${req.protocol}://${req.get("host")}`;
-    return `${PUBLIC_APP_URL}/verify-email.html?token=${encodeURIComponent(rawVerificationToken)}&email=${encodeURIComponent(email)}&api=${encodeURIComponent(apiOrigin)}`;
+    const verifyPageOrigin = resolveEmailAppOrigin(req);
+
+    return `${verifyPageOrigin}/verify-email.html?token=${encodeURIComponent(rawVerificationToken)}&email=${encodeURIComponent(email)}&api=${encodeURIComponent(apiOrigin)}`;
 }
 
 async function issueEmailVerificationToken(clientId) {
@@ -2640,7 +2654,8 @@ app.post("/api/client/forgot-password", async (req, res) => {
             const rawToken = crypto.randomBytes(32).toString("hex");
             const tokenHash = hashResetToken(rawToken);
             const expiry = new Date(Date.now() + 60 * 60 * 1000);
-            const resetLink = `${PUBLIC_APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}`;
+            const resetPageOrigin = resolveEmailAppOrigin(req);
+            const resetLink = `${resetPageOrigin}/reset-password.html?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}`;
 
             if (!IS_PRODUCTION) {
                 debugResetLink = resetLink;
