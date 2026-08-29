@@ -2,8 +2,25 @@ body {
     margin: 0;
     font-family: 'Montserrat', sans-serif;
     background-color: #f3f9f4;
+    background-image: url('images/luneliabackgroundnotext.jpg');
+    background-size: cover;
+    background-position: var(--bg-position-desktop);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     color: #333;
     line-height: 1.6;
+}
+
+:root {
+    --bg-position-desktop: center center;
+    --glass-card-bg: rgba(255, 255, 255, 0.9);
+}
+
+@media (max-width: 700px) {
+    body {
+        background-size: cover;
+        background-position: center center;
+    }
 }
 
 *, *::before, *::after {
@@ -47,6 +64,7 @@ html {
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-items: center;
+    background: transparent;
 }
 
 .header-actions .top-home-btn {
@@ -69,6 +87,7 @@ html {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
+    background: transparent;
 }
 
 .home-hero-actions .top-home-btn {
@@ -190,7 +209,7 @@ html {
 }
 
 .content-page section {
-    background: #fff;
+    background: var(--glass-card-bg);
     border: 1px solid #dbe9df;
     border-radius: 12px;
     padding: 28px;
@@ -240,7 +259,7 @@ body:not(.home-page):not(.booking-page) ul {
 }
 
 .specials-page .specials-card {
-    background: #fff;
+    background: var(--glass-card-bg);
     border: 1px solid #e8ddd5;
     border-radius: 12px;
     padding: 28px 32px;
@@ -420,7 +439,7 @@ body:not(.home-page):not(.booking-page) ul {
 
 /* Applied specials box on booking/checkout page */
 .specials-applied-box {
-    background: #fdf7f0;
+    background: rgba(253, 247, 240, 0.9);
     border: 1px solid #e8c99a;
     border-radius: 8px;
     padding: 12px 16px;
@@ -527,7 +546,7 @@ header {
     align-items: center;
     text-align: center;
     padding: 42px 20px 54px;
-    background: linear-gradient(to bottom, #e6f2e8, #f3f9f4);
+    background: transparent;
     border-bottom: 1px solid #d5e4d8;
 }
 
@@ -549,7 +568,7 @@ header h2 {
 
 /* Navbar styles */
 .services-nav {
-    background: #e6f2e8;
+    background: rgba(230, 242, 232, 0.9);
     padding: 10px 20px;
     text-align: center;
     z-index: 10;
@@ -585,6 +604,7 @@ header p {
     text-transform: uppercase;
     letter-spacing: 2px;
     color: #b8a885;
+    font-weight: 700;
 }
 
 section {
@@ -666,7 +686,7 @@ section h3::after {
 }
 
 .services {
-    background: white;
+    background: var(--glass-card-bg);
     border-radius: 10px;
     box-shadow: 0 5px 25px rgba(0,0,0,0.04);
 }
@@ -762,7 +782,7 @@ input:focus-visible {
 
 /* ===== CART ===== */
 .cart {
-    background: white;
+    background: var(--glass-card-bg);
     padding: 30px;
     border-radius: 10px;
     box-shadow: 0 5px 25px rgba(0,0,0,0.05);
@@ -804,7 +824,7 @@ input:focus-visible {
 .client-info,
 .cart-summary,
 .calendar-booking {
-    background: #ffffff;
+    background: var(--glass-card-bg);
     border-radius: 10px;
     box-shadow: 0 5px 25px rgba(0,0,0,0.04);
     padding: 30px;
@@ -830,7 +850,7 @@ input:focus-visible {
 }
 
 .cart-inline {
-    background: #f7fcf8;
+    background: rgba(247, 252, 248, 0.9);
     border: 1px solid #dfeee3;
     border-radius: 10px;
     padding: 16px;
@@ -888,7 +908,7 @@ input:focus-visible {
 }
 
 .client-info form {
-    background: #f7fcf8;
+    background: rgba(247, 252, 248, 0.9);
     border: 1px solid #dfeee3;
     border-radius: 10px;
     padding: 18px;
@@ -988,7 +1008,7 @@ input:focus-visible {
 .booking-details-card {
     margin-top: 20px;
     padding: 15px;
-    background: #f5f5f5;
+    background: rgba(245, 245, 245, 0.9);
     border-radius: 8px;
     border-left: 4px solid #8fbe9f;
 }
@@ -1707,7 +1727,7 @@ footer {
 /* ===== SPECIALS ===== */
 .specials {
     text-align: center;
-    background: white;
+    background: var(--glass-card-bg);
     border-radius: 10px;
     box-shadow: 0 5px 20px rgba(0,0,0,0.05);
     padding: 40px 30px;
@@ -1751,7 +1771,7 @@ footer {
 }
 
 .appointment-details {
-    background: #f3f9f4;
+    background: rgba(243, 249, 244, 0.9);
     padding: 20px;
     border-radius: 8px;
     margin: 30px 0;
