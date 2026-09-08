@@ -1,14 +1,22 @@
 body {
     margin: 0;
     font-family: 'Montserrat', sans-serif;
-    background-color: #f3f9f4;
-    background-image: url('images/luneliabackgroundnotext.jpg');
-    background-size: cover;
-    background-position: var(--bg-position-desktop);
-    background-repeat: no-repeat;
-    background-attachment: fixed;
+    background: transparent;
     color: #333;
     line-height: 1.6;
+    min-height: 100vh;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url('images/luneliabackgroundnotext.jpg');
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    z-index: -1;
 }
 
 :root {
@@ -17,9 +25,11 @@ body {
 }
 
 @media (max-width: 700px) {
-    body {
+    body::before {
         background-size: cover;
-        background-position: center center;
+        background-position: 50% 12%;
+        background-repeat: no-repeat;
+        background-attachment: scroll;
     }
 }
 
