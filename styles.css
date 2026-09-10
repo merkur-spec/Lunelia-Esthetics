@@ -1040,10 +1040,10 @@ input:focus-visible {
 
 .booking-page .client-info,
 .booking-page .calendar-booking {
-    background: transparent;
-    box-shadow: none;
-    border-radius: 0;
-    padding: 0;
+    background: var(--glass-card-bg);
+    box-shadow: 0 5px 25px rgba(0,0,0,0.04);
+    border-radius: 10px;
+    padding: 30px;
 }
 
 .booking-page .client-info h3,
@@ -1065,10 +1065,10 @@ input:focus-visible {
 }
 
 .booking-page .client-info form {
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    padding: 0;
+    background: rgba(247, 252, 248, 0.9);
+    border: 1px solid #dfeee3;
+    border-radius: 10px;
+    padding: 18px;
 }
 
 .booking-page .field-group {
@@ -1082,12 +1082,10 @@ input:focus-visible {
 }
 
 .booking-page .cart-inline {
-    background: transparent;
-    border: 0;
-    border-top: 1px solid #d5e7da;
-    border-bottom: 1px solid #d5e7da;
-    border-radius: 0;
-    padding: 14px 0;
+    background: rgba(247, 252, 248, 0.9);
+    border: 1px solid #dfeee3;
+    border-radius: 10px;
+    padding: 16px;
     margin: 16px 0 20px;
 }
 
@@ -1097,6 +1095,10 @@ input:focus-visible {
 
 .booking-page .time-wrapper {
     margin-top: 8px;
+    background: rgba(247, 252, 248, 0.9);
+    border: 1px solid #dfeee3;
+    border-radius: 10px;
+    padding: 16px;
 }
 
 .booking-page .time-slots {
@@ -1139,11 +1141,10 @@ input:focus-visible {
 
 .booking-page .booking-details-card {
     margin-top: 18px;
-    padding: 12px 0 0;
-    background: transparent;
-    border-radius: 0;
-    border-left: 0;
-    border-top: 1px dashed #adc9b7;
+    padding: 15px;
+    background: rgba(247, 252, 248, 0.9);
+    border-radius: 10px;
+    border: 1px solid #dfeee3;
 }
 
 .booking-page #pay-btn {
