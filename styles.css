@@ -994,6 +994,8 @@ input:focus-visible {
     cursor: pointer;
     text-align: center;
     transition: 0.2s;
+    box-sizing: border-box;
+    white-space: nowrap;
 }
 
 .time-slots button:hover:not(.disabled) {
@@ -1040,10 +1042,14 @@ input:focus-visible {
 
 .booking-page .client-info,
 .booking-page .calendar-booking {
-    background: var(--glass-card-bg);
+    background: #fff;
     box-shadow: 0 5px 25px rgba(0,0,0,0.04);
     border-radius: 10px;
     padding: 30px;
+}
+
+.booking-page .calendar-booking {
+    background: #fff !important;
 }
 
 .booking-page .client-info h3,
@@ -1065,10 +1071,10 @@ input:focus-visible {
 }
 
 .booking-page .client-info form {
-    background: rgba(247, 252, 248, 0.9);
-    border: 1px solid #dfeee3;
-    border-radius: 10px;
-    padding: 18px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
 }
 
 .booking-page .field-group {
@@ -1079,6 +1085,31 @@ input:focus-visible {
 .booking-page .calendar-booking input[type="date"] {
     background: #fff;
     border: 1px solid #c6ddce;
+}
+
+.booking-page .calendar-booking input[type="date"] {
+    width: min(240px, 100%);
+    color: #355243;
+    -webkit-text-fill-color: #355243;
+}
+
+.booking-page .calendar-booking input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 1;
+    cursor: pointer;
+}
+
+.booking-page .calendar-booking input[type="date"]:invalid::-webkit-datetime-edit {
+    color: #8aa091;
+}
+
+.date-input-help {
+    margin: -12px 0 14px;
+    font-size: 12px;
+    color: #6f8678;
+}
+
+.date-input-help.hidden {
+    display: none;
 }
 
 .booking-page .cart-inline {
@@ -1529,6 +1560,18 @@ table {
     margin: 0 auto;
 }
 
+.consent-page .client-info {
+    background: #fff;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.04);
+    border-radius: 10px;
+    padding: 30px;
+}
+
+.consent-page .client-info h3 {
+    display: block !important;
+    width: 100% !important;
+}
+
 .consent-page .client-info h3,
 .consent-page .section-subtitle {
     text-align: center;
@@ -1718,7 +1761,6 @@ th {
     font-weight: 600;
     color: #466551;
 }
-
 /* Pay & Confirm Booking button */
 #pay-btn {
     margin-top: 25px; /* push it slightly lower */
@@ -2055,6 +2097,21 @@ footer {
 
 }
 
+@media (max-width: 700px) and (hover: none) and (pointer: coarse) {
+    .time-slots td,
+    .time-slots td.time-slot-placeholder {
+        min-width: 78px;
+    }
+
+    .booking-page .time-slots button,
+    .client-page .client-reschedule-panel .time-slots button,
+    .admin-page .admin-reschedule-panel .time-slots button {
+        min-width: 78px;
+        padding: 8px 8px;
+        overflow: visible;
+    }
+}
+
 @media (max-width: 700px) {
     .services-nav {
         display: none;
@@ -2185,6 +2242,18 @@ footer {
 
     .booking-page .booking-container {
         grid-template-columns: 1fr !important;
+    }
+
+    .booking-page .time-slots button,
+    .client-page .client-reschedule-panel .time-slots button,
+    .admin-page .admin-reschedule-panel .time-slots button {
+        color: #fff;
+        -webkit-text-fill-color: #fff;
+        font-weight: 700;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.18);
+        min-height: 40px;
+        font-size: 13px;
+        line-height: 1.1;
     }
 
     .cart,

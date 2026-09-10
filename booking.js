@@ -14,6 +14,7 @@ const emailInput = document.getElementById("client-email");
 const phoneInput = document.getElementById("client-phone");
 const referralEmailInput = document.getElementById("referral-email");
 const formMessage = document.getElementById("form-message");
+const dateHelp = document.getElementById("date-help");
 const PENDING_BOOKING_KEY = "pendingBookingDraft";
 const WAX_PASS_SELECTION_KEY = "pendingWaxPassSelection";
 
@@ -292,6 +293,29 @@ function getRequestedDuration() {
     }, 0);
 }
 
+function getTimeSlotColumnsPerRow() {
+    const isMobileDevice = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+
+    if (!isMobileDevice) {
+        return 4;
+    }
+
+    if (window.matchMedia("(max-width: 420px)").matches) {
+        return 2;
+    }
+    if (window.matchMedia("(max-width: 700px)").matches) {
+        return 3;
+    }
+    return 4;
+}
+
+function updateDateHelpVisibility() {
+    if (!dateHelp || !dateInput) {
+        return;
+    }
+    dateHelp.classList.toggle("hidden", Boolean(dateInput.value));
+}
+
 function highlightSelectedBlock(startTime) {
     const requestedDuration = getRequestedDuration();
     const startMinutes = toMinutes(startTime);
@@ -409,7 +433,7 @@ function generateTimeSlots(date) {
         .then(appointments => {
             const requestedDuration = getRequestedDuration();
             const closeOfDay = toMinutes("17:30");
-            const columnsPerRow = 4;
+            const columnsPerRow = getTimeSlotColumnsPerRow();
 
             let row = null;
 
@@ -498,12 +522,15 @@ dateInput.min = today;
 
 // Trigger when date changes
 dateInput.addEventListener("change", () => {
+    updateDateHelpVisibility();
     if (!dateInput.value) return;
     payBtn.disabled = true;
     selectedTime = null;
     bookingDetailsDiv.style.display = "none";
     generateTimeSlots(dateInput.value);
 });
+
+dateInput.addEventListener("input", updateDateHelpVisibility);
 
 function updatePayButtonState() {
     const isFormValid =
@@ -621,4 +648,5 @@ payBtn.addEventListener("click", async () => {
 loadCart();
 updatePayButtonState();
 updateRewardsDisclaimer(false);
+updateDateHelpVisibility();
 prefillEmailFromSession();
