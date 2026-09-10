@@ -14,7 +14,6 @@ const emailInput = document.getElementById("client-email");
 const phoneInput = document.getElementById("client-phone");
 const referralEmailInput = document.getElementById("referral-email");
 const formMessage = document.getElementById("form-message");
-const dateHelp = document.getElementById("date-help");
 const PENDING_BOOKING_KEY = "pendingBookingDraft";
 const WAX_PASS_SELECTION_KEY = "pendingWaxPassSelection";
 
@@ -294,26 +293,20 @@ function getRequestedDuration() {
 }
 
 function getTimeSlotColumnsPerRow() {
-    const isMobileDevice = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+    const shortScreenEdge = Math.min(window.screen?.width || 0, window.screen?.height || 0);
+    const isPhoneSizedScreen = shortScreenEdge > 0 && shortScreenEdge <= 700;
+    const isMobileDevice =
+        window.matchMedia("(hover: none) and (pointer: coarse)").matches ||
+        window.matchMedia("(any-pointer: coarse)").matches ||
+        ("ontouchstart" in window) ||
+        navigator.maxTouchPoints > 0 ||
+        isPhoneSizedScreen ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 
-    if (!isMobileDevice) {
-        return 4;
-    }
-
-    if (window.matchMedia("(max-width: 420px)").matches) {
-        return 2;
-    }
-    if (window.matchMedia("(max-width: 700px)").matches) {
+    if (isMobileDevice && window.matchMedia("(max-width: 700px)").matches) {
         return 3;
     }
     return 4;
-}
-
-function updateDateHelpVisibility() {
-    if (!dateHelp || !dateInput) {
-        return;
-    }
-    dateHelp.classList.toggle("hidden", Boolean(dateInput.value));
 }
 
 function highlightSelectedBlock(startTime) {
@@ -520,17 +513,30 @@ function selectTime(btn, time) {
 const today = new Date().toISOString().split('T')[0];
 dateInput.min = today;
 
+function initializeDefaultDate() {
+    if (!dateInput) {
+        return;
+    }
+
+    if (!dateInput.value) {
+        dateInput.value = today;
+    }
+
+    selectedDate = dateInput.value || null;
+
+    if (cart.length > 0 && selectedDate) {
+        dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+}
+
 // Trigger when date changes
 dateInput.addEventListener("change", () => {
-    updateDateHelpVisibility();
     if (!dateInput.value) return;
     payBtn.disabled = true;
     selectedTime = null;
     bookingDetailsDiv.style.display = "none";
     generateTimeSlots(dateInput.value);
 });
-
-dateInput.addEventListener("input", updateDateHelpVisibility);
 
 function updatePayButtonState() {
     const isFormValid =
@@ -646,7 +652,7 @@ payBtn.addEventListener("click", async () => {
 
 // Initialize
 loadCart();
+initializeDefaultDate();
 updatePayButtonState();
 updateRewardsDisclaimer(false);
-updateDateHelpVisibility();
 prefillEmailFromSession();
