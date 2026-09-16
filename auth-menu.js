@@ -24,6 +24,25 @@
         });
     }
 
+    function orderMenuLinks() {
+        document.querySelectorAll(".top-menu-list").forEach((menuList) => {
+            const contactLink = menuList.querySelector('a[href="contact.html"]');
+            const waxPassLink = menuList.querySelector('a[href="wax-pass.html"]');
+            const signInLink = menuList.querySelector('a[href="client-login.html"], a[href="client.html"]');
+
+            if (contactLink) {
+                contactLink.textContent = "Contact Us";
+            }
+
+            if (contactLink && signInLink && waxPassLink) {
+                menuList.insertBefore(contactLink, signInLink);
+                if (waxPassLink.compareDocumentPosition(contactLink) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                    menuList.insertBefore(contactLink, waxPassLink.nextSibling);
+                }
+            }
+        });
+    }
+
     function setClientMenuLabel(isSignedIn) {
         document.querySelectorAll('a[href="client-login.html"]').forEach((link) => {
             link.textContent = isSignedIn ? "Client Portal" : "Sign In";
@@ -32,6 +51,7 @@
     }
 
     ensureWaxPassMenuLink();
+    orderMenuLinks();
 
     window.addEventListener("client-auth-state-changed", (event) => {
         setClientMenuLabel(event?.detail?.signedIn === true);

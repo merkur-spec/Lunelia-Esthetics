@@ -188,29 +188,37 @@ html {
 
 .top-menu-list {
     position: absolute;
-    right: 0;
+    right: 10px;
     top: calc(100% + 8px);
-    min-width: 180px;
+    width: min(150px, calc(100vw - 32px));
+    min-width: 0;
     background: #fff;
     border: 1px solid #d8e8dc;
-    border-radius: 10px;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(57, 84, 66, 0.12);
     padding: 8px;
     display: grid;
-    gap: 4px;
+    gap: 6px;
     z-index: 40;
 }
 
 .top-menu-list a {
+    display: block;
     color: #466551;
     text-decoration: none;
     border-radius: 8px;
-    padding: 9px 10px;
+    padding: 10px 12px;
     font-size: 14px;
+    font-weight: 500;
+    border: 1px solid transparent;
+    background: #f8fbf9;
+    text-align: left;
+    transition: all 0.16s ease;
 }
 
 .top-menu-list a:hover {
     background: #edf7f0;
+    border-color: #d7e8dc;
 }
 
 .content-page {
@@ -1843,7 +1851,7 @@ footer {
         }
 
         .top-menu-list {
-            min-width: 160px;
+            width: min(145px, calc(100vw - 28px));
         }
     }
 
