@@ -1,18 +1,18 @@
 # Lunelia Esthetics
 
-Lunelia Esthetics is a full-stack booking website for an esthetics business. The project combines a static HTML/CSS/JavaScript frontend with an Express server, PostgreSQL storage, Stripe checkout, email notifications, client accounts, wax pass support, and an authenticated admin dashboard.
+Lunelia Esthetics is a full-stack booking and client management app for an esthetics business. The project combines static frontend pages with an Express API and PostgreSQL backend to handle booking, payments, client accounts, password recovery, wax pass memberships, and the admin dashboard.
 
-## What this app does
+## What the app does
 
-- Displays service offerings and business pages
-- Lets clients book appointments with live availability checks
-- Processes payments through Stripe
-- Captures signed consent during booking
-- Supports client account creation, login, email verification, and password reset
-- Provides a client portal for appointments and wax passes
-- Supports wax pass purchases and credit redemption
-- Provides an authenticated admin dashboard for appointments, wax passes, expenses, and analytics
-- Persists data in PostgreSQL and applies startup schema updates automatically
+- Displays services and public marketing pages
+- Lets clients book appointments with date and time validation
+- Accepts Stripe checkout for standard appointments and wax pass purchases
+- Captures a signed consent step before completing a booking
+- Supports client registration, email verification, login, and password reset
+- Provides a client portal for upcoming and past appointments
+- Tracks wax pass credits and allows booking eligible services against remaining credits
+- Gives admins access to bookings, clients, expenses, finance reporting, analytics, and wax pass management
+- Creates and upgrades the required PostgreSQL schema automatically at startup
 
 ## Tech stack
 
@@ -20,32 +20,37 @@ Lunelia Esthetics is a full-stack booking website for an esthetics business. The
 - Backend: Node.js and Express
 - Database: PostgreSQL
 - Payments: Stripe
-- Email: Nodemailer
-- Security: Helmet, signed cookie sessions, CSRF protection, and rate limiting
+- Email: SendGrid via the `@sendgrid/mail` package
+- Security: Helmet, signed session cookies, CSRF checks, rate limiting, and HTTPS enforcement in production
 
-## Important files
+## Important project files
 
-- [index.html](index.html) — main public page
-- [booking.html](booking.html) — regular appointment checkout flow
+- [server.js](server.js) — Express app, routes, auth, database setup, Stripe logic, and email dispatch
+- [serviceData.js](serviceData.js) — shared service catalog and duration data
+- [index.html](index.html) — main public landing page
+- [booking.html](booking.html) — standard appointment checkout flow
+- [consent.html](consent.html) — signed consent page
+- [create-account.html](create-account.html) — client registration
+- [client-login.html](client-login.html) — client sign-in
+- [reset-password.html](reset-password.html) — request/reset password flow
+- [verify-email.html](verify-email.html) — email verification page
 - [wax-pass.html](wax-pass.html) — wax pass storefront
 - [wax-pass-booking.html](wax-pass-booking.html) — wax pass booking flow
-- [client.html](client.html) — authenticated client portal
-- [admin.html](admin.html) — authenticated admin dashboard
-- [server.js](server.js) — API routes, auth, Stripe, email, and database logic
-- [serviceData.js](serviceData.js) — service catalog and duration data
-- [styles.css](styles.css) — site styling
-- [package.json](package.json) — npm scripts and dependencies
-- [.env.example](.env.example) — environment template
+- [client.html](client.html) — client portal
+- [admin.html](admin.html) — admin dashboard
+- [styles.css](styles.css) — shared styling
+- [package.json](package.json) — scripts and dependencies
+- [.env.example](.env.example) — base environment template
 
 ## Requirements
 
-Install these before running locally:
+Before running the site locally, you need:
 
 - Node.js 18 or newer
 - npm
 - PostgreSQL
-- Stripe account and API keys
-- Email credentials if you want mail-based flows to work
+- A Stripe account with publishable and secret keys
+- A SendGrid API key and verified sender email for transactional mail
 
 ## Setup
 
@@ -61,47 +66,43 @@ npm install
 cp .env.example .env
 ```
 
-Then fill in your real values in [.env](.env).
+Then fill in the real values for your environment in [.env](.env).
 
 ## Environment variables
+
+The current app expects the following environment values.
 
 ### Required
 
 - `DATABASE_URL` — PostgreSQL connection string
+- `CLIENT_TOKEN_SECRET` — strong secret for client session signing; at least 32 characters recommended
+- `ADMIN_USER` — admin username
+- `ADMIN_PASS_HASH` — hashed admin password for the admin login flow
 - `STRIPE_PUBLIC_KEY` — Stripe publishable key
 - `STRIPE_SECRET_KEY` — Stripe secret key
-- `CLIENT_TOKEN_SECRET` — strong random secret for client sessions
-- `ADMIN_USER` — admin username
-- `ADMIN_PASS_HASH` or `ADMIN_PASS` — admin credential
+- `SENDGRID_API_KEY` — SendGrid API key for email delivery
+- `EMAIL_FROM` — sender address used for email messages
 
-### Recommended
+### Recommended or commonly used
 
-- `ADMIN_TOKEN_SECRET` — separate strong random secret for admin sessions
-- `STRIPE_WEBHOOK_SECRET` — needed for webhook-based Stripe flows
-- `RESEND_API_KEY` — Resend API key for production email delivery
-- `RESEND_FROM` — verified sender for Resend (or use `EMAIL_FROM`)
-- `SMTP_HOST` — SMTP host (optional alternative to Gmail)
-- `SMTP_PORT` — SMTP port (typically `587` or `465`)
-- `SMTP_SECURE` — `true` for TLS/465, `false` for STARTTLS/587
-- `SMTP_USER` — SMTP username/login
-- `SMTP_PASS` — SMTP password
-- `EMAIL_USER` — Gmail sender account (fallback/local option)
-- `EMAIL_PASS` — Gmail app password or fallback SMTP password
-- `EMAIL_FROM` — optional branded sender address
-- `INTERNAL_NOTIFICATION_EMAIL` — inbox for internal booking alerts
-- `PORT` — local or deployed server port
-- `NODE_ENV` — `production` outside local development
-- `DOMAIN` or `FRONTEND_URL` — public application URL
-- `CORS_ORIGIN` — allowed origins when needed
+- `ADMIN_TOKEN_SECRET` — separate admin session secret; if omitted, the app falls back to `CLIENT_TOKEN_SECRET`
+- `STRIPE_WEBHOOK_SECRET` — required for webhook verification when using Stripe webhook callbacks
+- `PORT` — server port; defaults to `3000`
+- `NODE_ENV` — set to `production` outside local development
+- `FRONTEND_URL` or `DOMAIN` — public base URL used for redirect and callback links
+- `CORS_ORIGIN` — comma-separated allowed origins for cross-origin requests when needed
 - `DB_SSL` — set to `true` when your PostgreSQL host requires SSL
-- `ADMIN_RATE_LIMIT_WINDOW_MS` — admin throttle window
-- `ADMIN_RATE_LIMIT_MAX` — admin throttle request cap
+- `DB_SSL_REJECT_UNAUTHORIZED` — use `false` for self-signed local PostgreSQL certificates when necessary
+- `ADMIN_RATE_LIMIT_WINDOW_MS` — admin rate-limit window in milliseconds
+- `ADMIN_RATE_LIMIT_MAX` — max admin requests per window
+- `API_RATE_LIMIT_WINDOW_MS` — general API rate-limit window in milliseconds
+- `API_RATE_LIMIT_MAX` — max general API requests per window
 
-Use [.env.example](.env.example) as the template.
+> The older Gmail/SMTP variables are not the primary mail setup in the current code; the server uses SendGrid by default.
 
 ## Database initialization
 
-The server creates and updates its core tables automatically on startup. That currently includes:
+The app bootstraps and upgrades its database automatically on startup. It creates and migrates tables such as:
 
 - `appointments`
 - `payments`
@@ -109,25 +110,25 @@ The server creates and updates its core tables automatically on startup. That cu
 - `expenses`
 - `wax_passes`
 
-It also applies additive migrations for new columns and indexes when they are missing.
+It also adds missing columns and indexes when the schema needs to be updated.
 
 ## Running locally
 
-Start the app:
+Start the server:
 
 ```bash
 npm start
 ```
 
-Run with auto-reload during development:
+Run with automatic restarts during development:
 
 ```bash
 npm run dev
 ```
 
-The server uses the `PORT` value from [.env](.env). If `PORT` is not set, it defaults to `3000`.
+The app listens on the value in `PORT` from your environment, or `3000` by default.
 
-## Routes
+## Public pages and protected routes
 
 ### Public pages
 
@@ -149,90 +150,91 @@ The server uses the `PORT` value from [.env](.env). If `PORT` is not set, it def
 
 - `/client` and `/client.html`
 - `/admin` and `/admin.html`
+- `/wax-pass-booking` and `/wax-pass-booking.html`
 
-Protected pages redirect unauthenticated users to their matching login page.
+Protected pages redirect unauthenticated users back to the matching login flow.
 
-## Authentication
+## Authentication and account flows
 
 ### Client authentication
 
 Clients can:
 
-- create accounts
-- verify their email
-- sign in
+- create an account
+- verify their email address
+- sign in with a session cookie
 - reset their password
-- access the client portal through a session cookie
+- view upcoming and past appointments from the client portal
+- access wax pass balance and booking history
 
 ### Admin authentication
 
-Admins sign in through [admin-login.html](admin-login.html). After successful login, the server issues an admin session cookie. Protected admin pages and admin API routes require that session.
+Admins sign in through [admin-login.html](admin-login.html). After login, the server issues an admin session cookie and checks it on protected admin pages and admin API routes.
 
 ## Booking and payment behavior
 
-- Standard appointments are paid through Stripe
-- Wax passes are sold as credit packages
-- Wax pass holders can book eligible services against remaining credits
-- Scheduling conflicts are checked using appointment overlap and stored durations
-- Signed consent is required during booking flows
+- Standard appointments are processed with Stripe checkout
+- Wax passes are sold as prepaid credit packages
+- Wax pass holders can book eligible services against remaining credit balance
+- Appointment overlap and duration checks are enforced before confirmation
+- Signed consent is required on the booking flow before a reservation is created
 
 ## Email behavior
 
-When email credentials are configured, the app can send messages for:
+When `SENDGRID_API_KEY` and `EMAIL_FROM` are configured, the app sends emails for:
 
 - booking confirmations
 - wax pass purchase confirmations
-- verification emails
+- client verification emails
 - password reset flows
+- internal booking notifications
 
-If email credentials are missing, those mail-based features may not work.
+If those values are missing, the app may still run, but mail-based flows will not complete successfully.
 
 ## Security
 
-- Helmet sets security-related HTTP headers
-- Client and admin auth use signed token cookies
-- Mutating routes use CSRF validation
-- Admin API routes use their own rate limiter
-- General API routes are rate-limited separately
-- Production traffic is redirected to HTTPS
+- Helmet hardens HTTP headers
+- Client and admin sessions are signed and cookie-based
+- Mutating routes require CSRF validation
+- Admin and general API routes are both rate limited
+- The server redirects insecure HTTP traffic to HTTPS in production
 
 ## Development notes
 
-- There is no frontend build system or framework
-- Static assets are served directly by Express
-- [serviceData.js](serviceData.js) is the shared service catalog used by both frontend and backend logic
+- There is no frontend build step or framework; the app serves static files directly through Express
+- [serviceData.js](serviceData.js) is the single shared source for service definitions used by both the frontend and backend
+- Database schema initialization is automatic, so local setup is mostly about the environment and PostgreSQL connection
 
 ## Troubleshooting
 
 ### The app does not start
 
 - Run `npm install`
-- Make sure PostgreSQL is running
-- Verify `DATABASE_URL`
-- Verify your Stripe keys exist
-- Verify `CLIENT_TOKEN_SECRET` is set and sufficiently long
+- Verify PostgreSQL is running and reachable
+- Make sure `DATABASE_URL` is set correctly
+- Confirm `CLIENT_TOKEN_SECRET` is present and strong enough
+- Check your Stripe credentials and SendGrid credentials in [.env](.env)
 
 ### The admin page redirects to login
 
-That is expected unless you already have a valid admin session.
+That is expected until a valid admin session is created.
 
 ### Emails are not sending
 
-- Preferred production setup: configure `RESEND_API_KEY` and `RESEND_FROM`
-- If using SMTP, verify `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASS`
-- If using Gmail fallback, verify `EMAIL_USER` and `EMAIL_PASS` (app password)
-- Check server logs for mail transport errors
+- Verify `SENDGRID_API_KEY` and `EMAIL_FROM`
+- Check the server logs for a mail transport error
+- Confirm your sender address is verified in SendGrid
 
 ### Stripe checkout is failing
 
 - Verify `STRIPE_PUBLIC_KEY` and `STRIPE_SECRET_KEY`
-- Verify `STRIPE_WEBHOOK_SECRET` if you rely on webhook confirmation
-- Make sure your configured public URL matches your Stripe settings
+- If webhook-based confirmation is used, confirm `STRIPE_WEBHOOK_SECRET`
+- Make sure the configured public app URL matches your Stripe settings
 
 ## Scripts
 
-- `npm start` — start the server
-- `npm run dev` — start the server with `nodemon`
+- `npm start` — start the production-style server
+- `npm run dev` — start the server with `nodemon` for local development
 
 ## License
 
