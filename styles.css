@@ -238,6 +238,22 @@ html {
     margin-top: 0;
 }
 
+.map-embed {
+    margin-top: 24px;
+    border: 1px solid #dbe9df;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.map-embed iframe {
+    display: block;
+    width: 100%;
+    min-height: 320px;
+    height: 320px;
+    border: 0;
+}
+
 .content-page ul {
     padding-left: 20px;
 }
