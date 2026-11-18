@@ -45,6 +45,7 @@ const serviceData = {
         badge: null,
         services: [
             { id: "brazilian", name: "Brazilian (Specialty)", price: 62, duration: 30, description: "", badge: "Specialty" },
+            { id: "male-brazilian", name: "Male Brazilian", price: 85, duration: 45, description: "", latestEnd: "17:00" },
             { id: "bikini-full", name: "Bikini Full", price: 52, duration: 25, description: "" },
             { id: "bikini-line-v", name: "Bikini Line (V)", price: 46, duration: 20, description: "" },
             { id: "bikini-line-f", name: "Bikini Line (F)", price: 43, duration: 20, description: "" },
@@ -144,12 +145,28 @@ function getAllServices() {
     return all;
 }
 
+// Helper: latest minute-of-day an appointment may end, given the booked service IDs
+const DEFAULT_LATEST_END_MINUTES = 17 * 60 + 30;
+function getLatestEndMinutes(serviceIds) {
+    let latest = DEFAULT_LATEST_END_MINUTES;
+    for (const serviceId of serviceIds || []) {
+        const service = findServiceById(serviceId);
+        if (!service || !service.latestEnd) continue;
+        const [hours, minutes] = String(service.latestEnd).split(":").map(Number);
+        if (Number.isInteger(hours) && Number.isInteger(minutes)) {
+            latest = Math.min(latest, hours * 60 + minutes);
+        }
+    }
+    return latest;
+}
+
 const exportedCatalog = {
     serviceData,
     comboStackingRules,
     calculateComboTime,
     findServiceById,
-    getAllServices
+    getAllServices,
+    getLatestEndMinutes
 };
 
 if (typeof module !== "undefined" && module.exports) {

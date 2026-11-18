@@ -292,6 +292,13 @@ function getRequestedDuration() {
     }, 0);
 }
 
+function getCloseOfDayMinutes() {
+    const getLatestEnd = window.luneliaServiceCatalog?.getLatestEndMinutes;
+    return typeof getLatestEnd === "function"
+        ? getLatestEnd(cart.map((service) => service?.id))
+        : toMinutes("17:30");
+}
+
 function getTimeSlotColumnsPerRow() {
     const shortScreenEdge = Math.min(window.screen?.width || 0, window.screen?.height || 0);
     const isPhoneSizedScreen = shortScreenEdge > 0 && shortScreenEdge <= 700;
@@ -425,7 +432,7 @@ function generateTimeSlots(date) {
         })
         .then(appointments => {
             const requestedDuration = getRequestedDuration();
-            const closeOfDay = toMinutes("17:30");
+            const closeOfDay = getCloseOfDayMinutes();
             const columnsPerRow = getTimeSlotColumnsPerRow();
 
             let row = null;

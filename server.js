@@ -8,7 +8,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const sgMail = require("@sendgrid/mail");
 const path = require("path");
 const crypto = require("crypto");
-const { serviceData } = require("./serviceData");
+const { serviceData, getLatestEndMinutes } = require("./serviceData");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -877,6 +877,17 @@ function getServicesTotalDuration(services) {
     return services.reduce((sum, service) => sum + service.duration, 0);
 }
 
+// Only services with an earlier-than-usual latestEnd are enforced server-side.
+function endsAfterServiceCutoff(time, durationMinutes, serviceIds) {
+    const latestEnd = getLatestEndMinutes(serviceIds);
+    if (latestEnd >= 17 * 60 + 30) {
+        return false;
+    }
+
+    const [hours, minutes] = String(time).split(":").map(Number);
+    return hours * 60 + minutes + durationMinutes > latestEnd;
+}
+
 async function finalizeWaxPassPurchaseFromSession(session, expectedClientId = null) {
     if (!session || session.payment_status !== "paid") {
         throw new Error("Payment not completed");
@@ -1090,6 +1101,11 @@ async function getApplicableSpecials(email, sanitizedServices, referralEmail, se
         if (hasBikini && isSelected("new_client_bikini")) {
             result.priceOverridesCents["bikini-full"] = 4800; // $48.00
             result.specials.push({ type: "new_client_bikini", label: "\u2728 New Client Special: First Bikini Full — $48" });
+        }
+        const hasMaleBrazilian = sanitizedServices.some((s) => s.id === "male-brazilian");
+        if (hasMaleBrazilian && isSelected("new_client_male_brazilian")) {
+            result.priceOverridesCents["male-brazilian"] = 7500; // $75.00
+            result.specials.push({ type: "new_client_male_brazilian", label: "\u2728 New Client Special: First Male Brazilian — $75" });
         }
     }
 
@@ -1824,6 +1840,10 @@ app.post("/api/free-booking", async (req, res) => {
 
         const requestedDuration = getServicesTotalDuration(sanitizedServices);
 
+        if (endsAfterServiceCutoff(time, requestedDuration, sanitizedServices.map((s) => s.id))) {
+            return res.status(400).json({ error: "Selected services must end by 5:00 PM" });
+        }
+
         const appointmentId = await withAppointmentLocks(
             [getAppointmentDateLockKey(date)],
             async (db) => {
@@ -1980,6 +2000,10 @@ app.post("/api/create-payment-intent", async (req, res) => {
 
         if (!Number.isInteger(requestedDuration) || requestedDuration <= 0) {
             return res.status(400).json({ error: "Invalid service duration" });
+        }
+
+        if (endsAfterServiceCutoff(time, requestedDuration, sanitizedServices.map((s) => s.id))) {
+            return res.status(400).json({ error: "Selected services must end by 5:00 PM" });
         }
 
         // Re-verify applicable specials server-side so the client cannot fake discounts
@@ -2881,7 +2905,7 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
         await withAppointmentLocks([getAppointmentDateLockKey(date)], async (db) => {
             const existing = await db.query(
                 `
-                    SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
+                    SELECT id, services, COALESCE(duration_minutes, 30) AS duration_minutes
                     FROM appointments
                     WHERE id = $1
                       AND LOWER(email) = LOWER($2)
@@ -2899,6 +2923,21 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
             }
 
             const duration = Number(existing.rows[0].duration_minutes) || 30;
+
+            let bookedServiceIds = [];
+            try {
+                const parsedServices = JSON.parse(existing.rows[0].services || "[]");
+                bookedServiceIds = (Array.isArray(parsedServices) ? parsedServices : [])
+                    .map((service) => (typeof service === "string" ? service : service?.id));
+            } catch (parseError) {
+                bookedServiceIds = [];
+            }
+
+            if (endsAfterServiceCutoff(time, duration, bookedServiceIds)) {
+                const cutoffError = new Error("Selected services must end by 5:00 PM");
+                cutoffError.statusCode = 400;
+                throw cutoffError;
+            }
 
             const overlap = await db.query(
                 `
@@ -2933,6 +2972,9 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
         }
         if (error?.statusCode === 409 || error?.code === "23505") {
             return res.status(409).json({ error: "Time slot already booked" });
+        }
+        if (error?.statusCode === 400) {
+            return res.status(400).json({ error: error.message });
         }
         return sendInternalError(res, "Client reschedule error:", error);
     }

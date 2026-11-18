@@ -526,6 +526,9 @@ body:not(.home-page):not(.booking-page) .content-page ul {
     margin: 8px 0 0;
     width: 100%;
     max-width: 340px;
+}
+
+.about-page .about-image-frame {
     aspect-ratio: 9 / 10;
     overflow: hidden;
     border-radius: 12px;
@@ -640,6 +643,12 @@ header p {
     letter-spacing: 2px;
     color: #b8a885;
     font-weight: 700;
+}
+
+/* Montserrat 700 isn't loaded, so bold is synthesized and looks like a shadow. */
+.home-page header p {
+    font-weight: 500;
+    text-shadow: none;
 }
 
 
