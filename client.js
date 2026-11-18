@@ -412,8 +412,9 @@ async function renderRescheduleSlots(date) {
             button.setAttribute("aria-pressed", "false");
 
             const slotStart = toMinutes(time);
+            const isClosedDay = new Date(`${date}T00:00:00`).getDay() === 0;
             const exceedsBusinessHours =
-                slotStart === null || closeOfDay === null
+                slotStart === null || closeOfDay === null || isClosedDay
                     ? true
                     : slotStart + requestedDuration > closeOfDay;
 

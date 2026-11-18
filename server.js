@@ -636,7 +636,7 @@ function isValidDate(value) {
 }
 
 function isValidTime(value) {
-    return /^\d{2}:\d{2}$/.test(value);
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function normalizeNameForComparison(value) {
@@ -877,15 +877,77 @@ function getServicesTotalDuration(services) {
     return services.reduce((sum, service) => sum + service.duration, 0);
 }
 
-// Only services with an earlier-than-usual latestEnd are enforced server-side.
-function endsAfterServiceCutoff(time, durationMinutes, serviceIds) {
-    const latestEnd = getLatestEndMinutes(serviceIds);
-    if (latestEnd >= 17 * 60 + 30) {
+// Business hours mirror the booking UI: 9:00 AM open, 15-minute slots, 5:30 PM default close.
+const BUSINESS_TIME_ZONE = "America/New_York";
+const BUSINESS_OPEN_MINUTES = 9 * 60;
+const BUSINESS_SLOT_INTERVAL_MINUTES = 15;
+const BUSINESS_CLOSED_WEEKDAYS = [0]; // 0 = Sunday ... 6 = Saturday
+
+function isRealCalendarDate(value) {
+    if (!isValidDate(value)) {
         return false;
     }
 
-    const [hours, minutes] = String(time).split(":").map(Number);
-    return hours * 60 + minutes + durationMinutes > latestEnd;
+    const [year, month, day] = value.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year
+        && parsed.getUTCMonth() === month - 1
+        && parsed.getUTCDate() === day;
+}
+
+function getBusinessNow() {
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-CA", {
+            timeZone: BUSINESS_TIME_ZONE,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23"
+        })
+            .formatToParts(new Date())
+            .map((part) => [part.type, part.value])
+    );
+
+    return {
+        date: `${parts.year}-${parts.month}-${parts.day}`,
+        minutes: Number(parts.hour) * 60 + Number(parts.minute)
+    };
+}
+
+// Returns an error message when the slot is not bookable, otherwise null.
+function getAppointmentSlotError(date, time, durationMinutes, serviceIds, { allowPast = false } = {}) {
+    if (!isRealCalendarDate(date) || !isValidTime(time)) {
+        return "Valid date and time are required";
+    }
+
+    const [year, month, day] = date.split("-").map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    if (BUSINESS_CLOSED_WEEKDAYS.includes(weekday)) {
+        return "We are closed on the selected day";
+    }
+
+    const [hours, minutes] = time.split(":").map(Number);
+    const startMinutes = hours * 60 + minutes;
+    if (startMinutes < BUSINESS_OPEN_MINUTES || minutes % BUSINESS_SLOT_INTERVAL_MINUTES !== 0) {
+        return "Selected time is not an available appointment slot";
+    }
+
+    const latestEnd = getLatestEndMinutes(serviceIds);
+    if (startMinutes + durationMinutes > latestEnd) {
+        const closing = `${Math.floor(latestEnd / 60) % 12 || 12}:${String(latestEnd % 60).padStart(2, "0")} PM`;
+        return `Selected services must end by ${closing}`;
+    }
+
+    if (!allowPast) {
+        const now = getBusinessNow();
+        if (date < now.date || (date === now.date && startMinutes < now.minutes)) {
+            return "Selected time has already passed";
+        }
+    }
+
+    return null;
 }
 
 async function finalizeWaxPassPurchaseFromSession(session, expectedClientId = null) {
@@ -1840,8 +1902,9 @@ app.post("/api/free-booking", async (req, res) => {
 
         const requestedDuration = getServicesTotalDuration(sanitizedServices);
 
-        if (endsAfterServiceCutoff(time, requestedDuration, sanitizedServices.map((s) => s.id))) {
-            return res.status(400).json({ error: "Selected services must end by 5:00 PM" });
+        const slotError = getAppointmentSlotError(date, time, requestedDuration, sanitizedServices.map((s) => s.id));
+        if (slotError) {
+            return res.status(400).json({ error: slotError });
         }
 
         const appointmentId = await withAppointmentLocks(
@@ -2002,8 +2065,9 @@ app.post("/api/create-payment-intent", async (req, res) => {
             return res.status(400).json({ error: "Invalid service duration" });
         }
 
-        if (endsAfterServiceCutoff(time, requestedDuration, sanitizedServices.map((s) => s.id))) {
-            return res.status(400).json({ error: "Selected services must end by 5:00 PM" });
+        const slotError = getAppointmentSlotError(date, time, requestedDuration, sanitizedServices.map((s) => s.id));
+        if (slotError) {
+            return res.status(400).json({ error: slotError });
         }
 
         // Re-verify applicable specials server-side so the client cannot fake discounts
@@ -2933,8 +2997,9 @@ app.post("/api/client/appointments/:id/reschedule", requireClient, requireCsrf, 
                 bookedServiceIds = [];
             }
 
-            if (endsAfterServiceCutoff(time, duration, bookedServiceIds)) {
-                const cutoffError = new Error("Selected services must end by 5:00 PM");
+            const slotError = getAppointmentSlotError(date, time, duration, bookedServiceIds);
+            if (slotError) {
+                const cutoffError = new Error(slotError);
                 cutoffError.statusCode = 400;
                 throw cutoffError;
             }
@@ -3211,7 +3276,7 @@ app.post("/api/admin/appointments/:id/reschedule", requireAdmin, requireAdminCsr
         await withAppointmentLocks([getAppointmentDateLockKey(date)], async (db) => {
             const existing = await db.query(
                 `
-                    SELECT id, COALESCE(duration_minutes, 30) AS duration_minutes
+                    SELECT id, services, COALESCE(duration_minutes, 30) AS duration_minutes
                     FROM appointments
                     WHERE id = $1
                       AND status IN ('confirmed', 'late')
@@ -3228,6 +3293,22 @@ app.post("/api/admin/appointments/:id/reschedule", requireAdmin, requireAdminCsr
             }
 
             const duration = Number(existing.rows[0].duration_minutes) || 30;
+
+            let bookedServiceIds = [];
+            try {
+                const parsedServices = JSON.parse(existing.rows[0].services || "[]");
+                bookedServiceIds = (Array.isArray(parsedServices) ? parsedServices : [])
+                    .map((service) => (typeof service === "string" ? service : service?.id));
+            } catch (parseError) {
+                bookedServiceIds = [];
+            }
+
+            const slotError = getAppointmentSlotError(date, time, duration, bookedServiceIds, { allowPast: true });
+            if (slotError) {
+                const slotValidationError = new Error(slotError);
+                slotValidationError.statusCode = 400;
+                throw slotValidationError;
+            }
 
             const overlap = await db.query(
                 `
@@ -3271,6 +3352,9 @@ app.post("/api/admin/appointments/:id/reschedule", requireAdmin, requireAdminCsr
         }
         if (error?.statusCode === 409 || error?.code === "23505") {
             return res.status(409).json({ error: "Time slot already booked" });
+        }
+        if (error?.statusCode === 400) {
+            return res.status(400).json({ error: error.message });
         }
         return sendInternalError(res, "Admin reschedule error:", error);
     }
@@ -3841,6 +3925,10 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
 
             const svc = canonicalServicesById.get(pass.service_id);
             const duration = svc ? (svc.duration || svc.durationMinutes || 30) : 30;
+            const slotError = getAppointmentSlotError(date, time, duration, [pass.service_id]);
+            if (slotError) {
+                const e = new Error(slotError); e.statusCode = 400; throw e;
+            }
             const overlap = await db.query(
                 `SELECT id FROM appointments
                  WHERE date = $1
