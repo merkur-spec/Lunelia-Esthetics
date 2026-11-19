@@ -296,7 +296,7 @@ function getCloseOfDayMinutes() {
     const getLatestEnd = window.luneliaServiceCatalog?.getLatestEndMinutes;
     return typeof getLatestEnd === "function"
         ? getLatestEnd(cart.map((service) => service?.id))
-        : toMinutes("17:30");
+        : toMinutes("20:00");
 }
 
 function getTimeSlotColumnsPerRow() {
@@ -414,7 +414,7 @@ function loadCart() {
     }
 }
 
-const times = buildTimeSlots(9, 17, 15, 30);
+const times = buildTimeSlots(9, 20, 15, 0);
 
 // Generate time buttons
 function generateTimeSlots(date) {

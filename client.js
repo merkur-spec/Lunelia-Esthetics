@@ -292,7 +292,7 @@ function buildTimeSlots(startHour = 9, endHour = 18, intervalMinutes = 15, endMi
     return slots;
 }
 
-const rescheduleTimes = buildTimeSlots(9, 17, 15, 30);
+const rescheduleTimes = buildTimeSlots(9, 20, 15, 0);
 
 async function fetchFromApi(path, options = {}) {
     let lastNetworkError = null;
@@ -384,7 +384,7 @@ async function renderRescheduleSlots(date) {
 
     rescheduleSlotsBody.innerHTML = "";
     const requestedDuration = Number(activeReschedule.durationMinutes) || 30;
-    const closeOfDay = activeReschedule.closeOfDayMinutes ?? toMinutes("17:30");
+    const closeOfDay = activeReschedule.closeOfDayMinutes ?? toMinutes("20:00");
 
     try {
         const appointments = await fetchFromApi(`/api/appointments?date=${encodeURIComponent(date)}`)
@@ -492,7 +492,7 @@ function getAppointmentCloseOfDayMinutes(servicesRaw) {
     }
 
     const getLatestEnd = window.luneliaServiceCatalog?.getLatestEndMinutes;
-    return typeof getLatestEnd === "function" ? getLatestEnd(ids) : toMinutes("17:30");
+    return typeof getLatestEnd === "function" ? getLatestEnd(ids) : toMinutes("20:00");
 }
 
 function openReschedulePanel(appointment) {
