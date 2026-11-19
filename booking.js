@@ -292,11 +292,11 @@ function getRequestedDuration() {
     }, 0);
 }
 
-function getCloseOfDayMinutes() {
+function getCloseOfDayMinutes(date) {
     const getLatestEnd = window.luneliaServiceCatalog?.getLatestEndMinutes;
     return typeof getLatestEnd === "function"
-        ? getLatestEnd(cart.map((service) => service?.id))
-        : toMinutes("20:00");
+        ? getLatestEnd(cart.map((service) => service?.id), date)
+        : 0;
 }
 
 function getTimeSlotColumnsPerRow() {
@@ -414,7 +414,10 @@ function loadCart() {
     }
 }
 
-const times = buildTimeSlots(9, 20, 15, 0);
+function getTimesForDate(date) {
+    const getSlots = window.luneliaServiceCatalog?.getBusinessTimeSlots;
+    return typeof getSlots === "function" ? getSlots(date) : [];
+}
 
 // Generate time buttons
 function generateTimeSlots(date) {
@@ -432,8 +435,19 @@ function generateTimeSlots(date) {
         })
         .then(appointments => {
             const requestedDuration = getRequestedDuration();
-            const closeOfDay = getCloseOfDayMinutes();
+            const closeOfDay = getCloseOfDayMinutes(date);
             const columnsPerRow = getTimeSlotColumnsPerRow();
+            const times = getTimesForDate(date);
+
+            if (times.length === 0) {
+                const closedRow = document.createElement("tr");
+                const closedCell = document.createElement("td");
+                closedCell.colSpan = columnsPerRow;
+                closedCell.textContent = "We are closed on this day. Please choose another date.";
+                closedRow.appendChild(closedCell);
+                timeSlotsContainer.appendChild(closedRow);
+                return;
+            }
 
             let row = null;
 
@@ -449,9 +463,8 @@ function generateTimeSlots(date) {
                 btn.setAttribute("aria-pressed", "false");
 
                 const slotStart = toMinutes(time);
-                const isClosedDay = new Date(`${date}T00:00:00`).getDay() === 0;
                 const exceedsBusinessHours =
-                    slotStart === null || closeOfDay === null || isClosedDay
+                    slotStart === null || closeOfDay === null
                         ? true
                         : slotStart + requestedDuration > closeOfDay;
                 const conflict = appointments.some((apt) => {

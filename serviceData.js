@@ -145,16 +145,44 @@ function getAllServices() {
     return all;
 }
 
-// Helper: latest minute-of-day an appointment may end, given the booked service IDs
-const DEFAULT_LATEST_END_MINUTES = 20 * 60;
-function getLatestEndMinutes(serviceIds) {
-    let latest = DEFAULT_LATEST_END_MINUTES;
+// Weekly schedule in minutes from midnight (0 = Sunday ... 6 = Saturday). Days not listed are closed.
+const BUSINESS_HOURS = {
+    0: { open: 9 * 60, close: 17 * 60 },
+    1: { open: 16 * 60, close: 19 * 60 },
+    4: { open: 7 * 60, close: 13 * 60 },
+    5: { open: 7 * 60, close: 13 * 60 }
+};
+const BUSINESS_SLOT_INTERVAL_MINUTES = 15;
+
+// Returns { open, close } for a YYYY-MM-DD date, or null when closed.
+function getBusinessHoursForDate(dateText) {
+    const [year, month, day] = String(dateText || "").split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return BUSINESS_HOURS[weekday] || null;
+}
+
+// Start times (HH:MM) offered on a date; empty when closed.
+function getBusinessTimeSlots(dateText) {
+    const hours = getBusinessHoursForDate(dateText);
+    const slots = [];
+    if (!hours) return slots;
+    for (let minutes = hours.open; minutes < hours.close; minutes += BUSINESS_SLOT_INTERVAL_MINUTES) {
+        slots.push(`${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
+    }
+    return slots;
+}
+
+// Helper: latest minute-of-day an appointment may end on a date, given the booked service IDs
+function getLatestEndMinutes(serviceIds, dateText) {
+    const hours = getBusinessHoursForDate(dateText);
+    let latest = hours ? hours.close : 0;
     for (const serviceId of serviceIds || []) {
         const service = findServiceById(serviceId);
         if (!service || !service.latestEnd) continue;
-        const [hours, minutes] = String(service.latestEnd).split(":").map(Number);
-        if (Number.isInteger(hours) && Number.isInteger(minutes)) {
-            latest = Math.min(latest, hours * 60 + minutes);
+        const [endHour, endMinute] = String(service.latestEnd).split(":").map(Number);
+        if (Number.isInteger(endHour) && Number.isInteger(endMinute)) {
+            latest = Math.min(latest, endHour * 60 + endMinute);
         }
     }
     return latest;
@@ -166,7 +194,9 @@ const exportedCatalog = {
     calculateComboTime,
     findServiceById,
     getAllServices,
-    getLatestEndMinutes
+    getLatestEndMinutes,
+    getBusinessHoursForDate,
+    getBusinessTimeSlots
 };
 
 if (typeof module !== "undefined" && module.exports) {

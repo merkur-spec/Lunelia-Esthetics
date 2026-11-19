@@ -8,7 +8,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const sgMail = require("@sendgrid/mail");
 const path = require("path");
 const crypto = require("crypto");
-const { serviceData, getLatestEndMinutes } = require("./serviceData");
+const { serviceData, getLatestEndMinutes, getBusinessHoursForDate } = require("./serviceData");
 const {
     CONSENT_FORMS,
     CONSENT_VALIDITY_MONTHS,
@@ -1174,11 +1174,15 @@ function getServicesTotalDuration(services) {
     return services.reduce((sum, service) => sum + service.duration, 0);
 }
 
-// Business hours mirror the booking UI: 9:00 AM open, 15-minute slots, 8:00 PM default close.
+// Weekly hours live in serviceData.js so the booking UIs use the same schedule.
 const BUSINESS_TIME_ZONE = "America/New_York";
-const BUSINESS_OPEN_MINUTES = 9 * 60;
 const BUSINESS_SLOT_INTERVAL_MINUTES = 15;
-const BUSINESS_CLOSED_WEEKDAYS = [0]; // 0 = Sunday ... 6 = Saturday
+
+function formatMinutesAsClockTime(totalMinutes) {
+    const hour = Math.floor(totalMinutes / 60);
+    const suffix = hour >= 12 ? "PM" : "AM";
+    return `${hour % 12 || 12}:${String(totalMinutes % 60).padStart(2, "0")} ${suffix}`;
+}
 
 function isRealCalendarDate(value) {
     if (!isValidDate(value)) {
@@ -1219,22 +1223,20 @@ function getAppointmentSlotError(date, time, durationMinutes, serviceIds, { allo
         return "Valid date and time are required";
     }
 
-    const [year, month, day] = date.split("-").map(Number);
-    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-    if (BUSINESS_CLOSED_WEEKDAYS.includes(weekday)) {
+    const businessHours = getBusinessHoursForDate(date);
+    if (!businessHours) {
         return "We are closed on the selected day";
     }
 
     const [hours, minutes] = time.split(":").map(Number);
     const startMinutes = hours * 60 + minutes;
-    if (startMinutes < BUSINESS_OPEN_MINUTES || minutes % BUSINESS_SLOT_INTERVAL_MINUTES !== 0) {
+    if (startMinutes < businessHours.open || minutes % BUSINESS_SLOT_INTERVAL_MINUTES !== 0) {
         return "Selected time is not an available appointment slot";
     }
 
-    const latestEnd = getLatestEndMinutes(serviceIds);
+    const latestEnd = getLatestEndMinutes(serviceIds, date);
     if (startMinutes + durationMinutes > latestEnd) {
-        const closing = `${Math.floor(latestEnd / 60) % 12 || 12}:${String(latestEnd % 60).padStart(2, "0")} PM`;
-        return `Selected services must end by ${closing}`;
+        return `Selected services must end by ${formatMinutesAsClockTime(latestEnd)}`;
     }
 
     if (!allowPast) {

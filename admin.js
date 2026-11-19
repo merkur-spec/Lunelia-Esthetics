@@ -134,7 +134,23 @@ function getCatalogServiceName(serviceId) {
     return String(match?.name || "").trim();
 }
 
-const adminRescheduleTimes = buildTimeSlots(9, 20, 15, 0);
+function getAdminRescheduleTimesForDate(date) {
+    const getSlots = window.luneliaServiceCatalog?.getBusinessTimeSlots;
+    return typeof getSlots === "function" ? getSlots(date) : [];
+}
+
+function getAppointmentServiceIds(servicesRaw) {
+    try {
+        const parsed = typeof servicesRaw === "string" ? JSON.parse(servicesRaw || "[]") : servicesRaw;
+        if (Array.isArray(parsed)) {
+            return parsed.map((service) => (typeof service === "string" ? service : service?.id));
+        }
+    } catch (error) {
+        return [];
+    }
+
+    return [];
+}
 
 function setAdminMessage(message) {
     const isLoggedIn = loginSection?.hidden;
@@ -547,7 +563,19 @@ async function renderAdminRescheduleSlots(date) {
 
     adminRescheduleSlotsBody.innerHTML = "";
     const requestedDuration = Number(activeAdminReschedule.durationMinutes) || 30;
-    const closeOfDay = toMinutes("20:00");
+    const getLatestEnd = window.luneliaServiceCatalog?.getLatestEndMinutes;
+    const closeOfDay = typeof getLatestEnd === "function" ? getLatestEnd(activeAdminReschedule.serviceIds, date) : 0;
+    const adminRescheduleTimes = getAdminRescheduleTimesForDate(date);
+
+    if (adminRescheduleTimes.length === 0) {
+        const closedRow = document.createElement("tr");
+        const closedCell = document.createElement("td");
+        closedCell.colSpan = 4;
+        closedCell.textContent = "We are closed on this day. Please choose another date.";
+        closedRow.appendChild(closedCell);
+        adminRescheduleSlotsBody.appendChild(closedRow);
+        return;
+    }
 
     try {
         const response = await fetch(`/api/appointments?date=${encodeURIComponent(date)}`);
@@ -574,9 +602,8 @@ async function renderAdminRescheduleSlots(date) {
             button.setAttribute("aria-pressed", "false");
 
             const slotStart = toMinutes(time);
-            const isClosedDay = new Date(`${date}T00:00:00`).getDay() === 0;
             const exceedsBusinessHours =
-                slotStart === null || closeOfDay === null || isClosedDay
+                slotStart === null || closeOfDay === null
                     ? true
                     : slotStart + requestedDuration > closeOfDay;
 
@@ -651,6 +678,7 @@ function openAdminReschedulePanel(appointment) {
     activeAdminReschedule = {
         appointmentId: appointment.id,
         durationMinutes: Number(appointment.duration_minutes) || 30,
+        serviceIds: getAppointmentServiceIds(appointment.services),
         currentDate: appointment.date || "",
         currentTime: String(appointment.time || "").slice(0, 5),
         selectedDate: "",
@@ -1408,7 +1436,17 @@ async function loadFinance() {
 }
 
 async function loadDashboard() {
-    await Promise.all([loadAppointments(), loadAnalytics(), loadFinance(), loadConsents()]);
+    await Promise.all([
+        loadAppointments(),
+        loadAnalytics(),
+        loadFinance(),
+        // A consent list failure shouldn't block the rest of the dashboard.
+        loadConsents().catch((error) => {
+            if (consentListMessage) {
+                consentListMessage.textContent = error.message || "Unable to load consent forms.";
+            }
+        })
+    ]);
     setActiveAdminSection(activeAdminSection);
 }
 

@@ -258,6 +258,15 @@ html {
     padding-left: 20px;
 }
 
+.contact-page .content-page {
+    max-width: 620px;
+}
+
+.contact-page .map-embed iframe {
+    min-height: 240px;
+    height: 240px;
+}
+
 body:not(.home-page):not(.booking-page) main,
 body:not(.home-page):not(.booking-page) section,
 body:not(.home-page):not(.booking-page) p,
@@ -514,6 +523,16 @@ body:not(.home-page):not(.booking-page) .content-page ul {
     padding-left: 0;
 }
 
+.content-page .contact-details {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+body:not(.home-page):not(.booking-page) .content-page .contact-details p {
+    text-align: left;
+}
+
 .about-page .about-layout {
     display: grid;
     grid-template-columns: minmax(240px, 320px) 1fr;
@@ -728,6 +747,13 @@ section h3::after {
 
 .service-item:hover {
     background-color: #f6fbf7;
+}
+
+.service-item span {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 15px;
+    letter-spacing: 0;
+    color: #000;
 }
 
 .services {
