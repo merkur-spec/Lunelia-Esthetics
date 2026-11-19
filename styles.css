@@ -591,9 +591,20 @@ body:not(.home-page):not(.booking-page) .content-page .contact-details p {
 
     .about-page .about-image-wrap {
         order: 2;
-        max-width: 340px;
-        width: 100%;
-        margin: 0 auto;
+        max-width: none;
+        width: auto;
+        margin: 0 -20px -20px;
+    }
+
+    .about-page .about-image-frame {
+        border-width: 1px 0 0;
+        border-radius: 0 0 11px 11px;
+    }
+}
+
+@media (max-width: 700px) {
+    .about-page .about-image-wrap {
+        margin: 0 -16px -16px;
     }
 }
 
