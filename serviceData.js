@@ -73,8 +73,8 @@ const serviceData = {
             { id: "high-frequency", name: "High Frequency Treatment", price: 20, duration: 0, description: "Included in facial block" },
             { id: "led-therapy", name: "LED Light Therapy", price: 20, duration: 0, description: "Included in facial block" },
             { id: "scalp-massage", name: "Scalp Massage", price: 15, duration: 0, description: "Included in facial block" },
-            { id: "lash-lift-tint", name: "Lash Lift & Tint", price: 70, duration: 75, description: "Standalone appointment" },
-            { id: "lash-tint", name: "Lash Tint", price: 15, duration: 25, description: "Standalone appointment" }
+            { id: "lash-tint", name: "Lash Tint", price: 25, duration: 25, description: "Standalone appointment" },
+            { id: "brow-tint", name: "Brow Tint", price: 25, duration: 25, description: "Standalone appointment" }
         ]
     },
     "chemical-peels": {
@@ -146,7 +146,7 @@ function getAllServices() {
 }
 
 // Helper: latest minute-of-day an appointment may end, given the booked service IDs
-const DEFAULT_LATEST_END_MINUTES = 17 * 60 + 30;
+const DEFAULT_LATEST_END_MINUTES = 20 * 60;
 function getLatestEndMinutes(serviceIds) {
     let latest = DEFAULT_LATEST_END_MINUTES;
     for (const serviceId of serviceIds || []) {

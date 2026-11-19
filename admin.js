@@ -11,6 +11,14 @@ const appointmentsTableBody = document.querySelector("#appointments-table tbody"
 const pastAppointmentsTableBody = document.querySelector("#past-appointments-table tbody");
 const clientsSection = document.getElementById("admin-clients");
 const clientsTableBody = document.querySelector("#clients-table tbody");
+const consentsSection = document.getElementById("admin-consents");
+const consentsTableBody = document.querySelector("#consents-table tbody");
+const consentSearchForm = document.getElementById("consent-search-form");
+const consentSearchInput = document.getElementById("consent-search");
+const consentListMessage = document.getElementById("consent-list-message");
+const consentDetail = document.getElementById("consent-detail");
+const consentDetailBody = document.getElementById("consent-detail-body");
+const consentDetailClose = document.getElementById("consent-detail-close");
 const reportsSection = document.getElementById("admin-reports");
 const financeSection = document.getElementById("admin-finance");
 const adminSectionSelect = document.getElementById("admin-section-select");
@@ -126,7 +134,7 @@ function getCatalogServiceName(serviceId) {
     return String(match?.name || "").trim();
 }
 
-const adminRescheduleTimes = buildTimeSlots(9, 17, 15, 30);
+const adminRescheduleTimes = buildTimeSlots(9, 20, 15, 0);
 
 function setAdminMessage(message) {
     const isLoggedIn = loginSection?.hidden;
@@ -141,6 +149,7 @@ function setActiveAdminSection(sectionName) {
     const sectionMap = {
         appointments: appointmentsSection,
         clients: clientsSection,
+        consents: consentsSection,
         reports: reportsSection,
         finance: financeSection
     };
@@ -538,7 +547,7 @@ async function renderAdminRescheduleSlots(date) {
 
     adminRescheduleSlotsBody.innerHTML = "";
     const requestedDuration = Number(activeAdminReschedule.durationMinutes) || 30;
-    const closeOfDay = toMinutes("17:30");
+    const closeOfDay = toMinutes("20:00");
 
     try {
         const response = await fetch(`/api/appointments?date=${encodeURIComponent(date)}`);
@@ -1269,6 +1278,119 @@ adminRescheduleSaveButton?.addEventListener("click", async () => {
     }
 });
 
+function formatConsentDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "-" : date.toLocaleDateString();
+}
+
+function renderConsents(rows) {
+    if (!consentsTableBody) {
+        return;
+    }
+
+    consentsTableBody.innerHTML = "";
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        const row = document.createElement("tr");
+        row.innerHTML = '<td colspan="8">No signed consent forms found.</td>';
+        consentsTableBody.appendChild(row);
+        return;
+    }
+
+    rows.forEach((consent) => {
+        const status = !consent.verified ? "Guest booking" : consent.isCurrent ? "Valid" : "Expired";
+        const emailLabels = {
+            sent: "Sent",
+            pending: `NOT SENT (retrying, ${consent.emailAttempts || 0} failed)`,
+            failed: "NOT SENT (gave up)",
+            unknown: "-"
+        };
+        const emailNotSent = consent.emailStatus === "pending" || consent.emailStatus === "failed";
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${escapeHtml(formatConsentDate(consent.signedAt))}</td>
+            <td>${escapeHtml(consent.signature || "-")}</td>
+            <td>${escapeHtml(consent.email || "-")}</td>
+            <td>${escapeHtml(consent.formTitle || consent.formType)}</td>
+            <td>${escapeHtml(consent.verified ? formatConsentDate(consent.validUntil) : "-")}</td>
+            <td>${escapeHtml(status)}</td>
+            <td${emailNotSent ? ' class="consent-email-flag"' : ""}>${escapeHtml(emailLabels[consent.emailStatus] || "-")}</td>
+            <td>
+                <button type="button" data-consent-id="${escapeHtml(String(consent.id))}">View</button>
+                ${emailNotSent ? `<button type="button" data-consent-resend-id="${escapeHtml(String(consent.id))}">Resend</button>` : ""}
+            </td>
+        `;
+        consentsTableBody.appendChild(row);
+    });
+}
+
+async function loadConsents() {
+    const query = new URLSearchParams({ q: consentSearchInput?.value?.trim() || "" });
+    const rows = await fetchAdminJson(`/api/admin/consent-forms?${query.toString()}`);
+    renderConsents(rows);
+
+    const unsent = Array.isArray(rows)
+        ? rows.filter((row) => row.emailStatus === "pending" || row.emailStatus === "failed").length
+        : 0;
+    if (consentListMessage) {
+        consentListMessage.textContent = unsent > 0
+            ? `${unsent} consent form(s) have not been emailed to the owner yet.`
+            : "";
+    }
+}
+
+consentSearchForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+        consentListMessage.textContent = "Searching...";
+        await loadConsents();
+    } catch (error) {
+        consentListMessage.textContent = error.message || "Unable to load consent forms.";
+    }
+});
+
+consentsTableBody?.addEventListener("click", async (event) => {
+    const resendButton = event.target.closest("button[data-consent-resend-id]");
+    if (resendButton) {
+        try {
+            resendButton.disabled = true;
+            consentListMessage.textContent = "Sending email...";
+            await fetchAdminJson(
+                `/api/admin/consent-forms/${encodeURIComponent(resendButton.dataset.consentResendId)}/resend`,
+                { method: "POST" }
+            );
+            await loadConsents();
+        } catch (error) {
+            consentListMessage.textContent = error.message || "Unable to resend the email.";
+            resendButton.disabled = false;
+        }
+        return;
+    }
+
+    const button = event.target.closest("button[data-consent-id]");
+    if (!button) {
+        return;
+    }
+
+    try {
+        consentListMessage.textContent = "Loading form...";
+        const detail = await fetchAdminJson(`/api/admin/consent-forms/${encodeURIComponent(button.dataset.consentId)}`);
+        // Server escapes every client-supplied value before building this HTML.
+        consentDetailBody.innerHTML = detail.html;
+        consentDetail.hidden = false;
+        consentDetail.scrollIntoView({ behavior: "smooth", block: "start" });
+        consentListMessage.textContent = "";
+    } catch (error) {
+        consentListMessage.textContent = error.message || "Unable to load consent form.";
+    }
+});
+
+consentDetailClose?.addEventListener("click", () => {
+    consentDetail.hidden = true;
+    consentDetailBody.innerHTML = "";
+});
+
 async function loadAnalytics() {
     const start = analyticsStartInput?.value;
     const end = analyticsEndInput?.value;
@@ -1286,7 +1408,7 @@ async function loadFinance() {
 }
 
 async function loadDashboard() {
-    await Promise.all([loadAppointments(), loadAnalytics(), loadFinance()]);
+    await Promise.all([loadAppointments(), loadAnalytics(), loadFinance(), loadConsents()]);
     setActiveAdminSection(activeAdminSection);
 }
 

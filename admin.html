@@ -51,6 +51,7 @@
                 <select id="admin-section-select" class="admin-section-select" aria-label="Select admin section">
                     <option value="appointments">Appointments</option>
                     <option value="clients">Clients</option>
+                    <option value="consents">Consent Forms</option>
                     <option value="reports">Reports &amp; Analytics</option>
                     <option value="finance">Revenue &amp; Expenses</option>
                 </select>
@@ -142,6 +143,42 @@
                     </thead>
                     <tbody></tbody>
                 </table>
+            </div>
+        </section>
+
+        <section class="calendar-booking admin-consents" id="admin-consents" data-admin-section="consents" hidden>
+            <h3>Consent Forms</h3>
+            <form id="consent-search-form" class="analytics-filter" novalidate>
+                <div class="field-group">
+                    <label for="consent-search">Search by name or email</label>
+                    <input type="search" id="consent-search" autocomplete="off">
+                </div>
+                <button type="submit">Search</button>
+            </form>
+            <p id="consent-list-message" class="form-message" role="status" aria-live="polite"></p>
+
+            <div class="table-wrapper admin-table-wrapper">
+                <table id="consents-table" class="admin-table">
+                    <caption>Signed consent forms</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Signed</th>
+                            <th scope="col">Signature</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Form</th>
+                            <th scope="col">Valid Until</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Owner Email</th>
+                            <th scope="col">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <div id="consent-detail" class="consent-detail" hidden>
+                <button type="button" id="consent-detail-close">Close</button>
+                <div id="consent-detail-body"></div>
             </div>
         </section>
 

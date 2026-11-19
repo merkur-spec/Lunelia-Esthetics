@@ -9,6 +9,13 @@ const sgMail = require("@sendgrid/mail");
 const path = require("path");
 const crypto = require("crypto");
 const { serviceData, getLatestEndMinutes } = require("./serviceData");
+const {
+    CONSENT_FORMS,
+    CONSENT_VALIDITY_MONTHS,
+    getRequiredConsentTypes,
+    validateConsentAnswers,
+    renderConsentFormEmailHtml
+} = require("./consentForms");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -362,6 +369,36 @@ async function initializeDatabase() {
             )
         `);
 
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS consent_form_signatures (
+                id SERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                form_type TEXT NOT NULL,
+                form_version TEXT,
+                signature TEXT NOT NULL,
+                signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await pool.query(
+            "ALTER TABLE consent_form_signatures ADD COLUMN IF NOT EXISTS answers TEXT"
+        );
+        await pool.query(
+            "ALTER TABLE consent_form_signatures ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE"
+        );
+        // email_attempts stays NULL for rows saved before delivery tracking existed.
+        for (const column of [
+            "client_name TEXT",
+            "client_phone TEXT",
+            "email_attempts INTEGER",
+            "email_sent_at TIMESTAMP",
+            "email_last_error TEXT"
+        ]) {
+            await pool.query(`ALTER TABLE consent_form_signatures ADD COLUMN IF NOT EXISTS ${column}`);
+        }
+        await pool.query(
+            "CREATE INDEX IF NOT EXISTS consent_form_signatures_lookup ON consent_form_signatures (email, form_type, signed_at DESC)"
+        );
+
         await pool.query(
             "CREATE UNIQUE INDEX IF NOT EXISTS appointments_date_time_unique ON appointments (date, time)"
         );
@@ -598,6 +635,7 @@ async function sendInternalBookingNotification(details = {}) {
               timeZoneName: "short"
           });
     const consentSignature = String(details.consentSignature || "").trim();
+    const consentSummary = String(details.consentSummary || "").trim();
     const services = formatServicesForEmail(details.services);
     const totalPaidCents = Number(details.totalPaidCents);
     const amountLine = Number.isFinite(totalPaidCents)
@@ -607,6 +645,7 @@ async function sendInternalBookingNotification(details = {}) {
         ? `
             <p><strong>Signed Consent Form:</strong> Yes</p>
             <p><strong>Consent Signature:</strong> ${escapeHtml(consentSignature)}</p>
+            ${consentSummary ? `<p><strong>Consent Forms:</strong> ${escapeHtml(consentSummary)}</p>` : ""}
           `
         : `<p><strong>Signed Consent Form:</strong> No signature captured</p>`;
 
@@ -651,6 +690,264 @@ function signatureMatchesBookingName(signature, bookingName) {
     const normalizedBookingName = normalizeNameForComparison(bookingName);
 
     return Boolean(normalizedSignature) && Boolean(normalizedBookingName) && normalizedSignature === normalizedBookingName;
+}
+
+// Returns Map(formType -> { signature, signedAt, validUntil }) for forms signed within the validity window.
+// Only signed-in clients can reuse a form on file; guests always sign again.
+async function getValidConsentRecords(db, email, formTypes, verified) {
+    const records = new Map();
+    if (!verified || !email || formTypes.length === 0) {
+        return records;
+    }
+
+    const result = await db.query(
+        `SELECT DISTINCT ON (form_type) form_type, signature, signed_at,
+                signed_at + make_interval(months => $3::int) AS valid_until
+         FROM consent_form_signatures
+         WHERE email = $1 AND form_type = ANY($2::text[]) AND verified = TRUE
+           AND signed_at > NOW() - make_interval(months => $3::int)
+         ORDER BY form_type, signed_at DESC`,
+        [email, formTypes, CONSENT_VALIDITY_MONTHS]
+    );
+
+    for (const row of result.rows) {
+        records.set(row.form_type, {
+            signature: row.signature,
+            signedAt: row.signed_at,
+            validUntil: row.valid_until
+        });
+    }
+    return records;
+}
+
+// Requires a signature only for forms with no valid record on file, and records any newly signed forms.
+async function resolveBookingConsent(db, { email, name, phone, services, consent, verified }) {
+    const requiredTypes = getRequiredConsentTypes((services || []).map((service) => service.id));
+    const normalizedEmail = normalizeEmail(email);
+    const onFile = await getValidConsentRecords(db, normalizedEmail, requiredTypes, verified);
+    const missing = requiredTypes.filter((type) => !onFile.has(type));
+    const submissions = [];
+
+    let signature = "";
+    if (missing.length > 0) {
+        signature = String(consent?.signature || "").trim();
+        const acknowledged = Array.isArray(consent?.forms) ? consent.forms.map(String) : [];
+
+        if (
+            consent?.accepted !== true ||
+            signature.length < 2 ||
+            !missing.every((type) => acknowledged.includes(type))
+        ) {
+            return { error: "Consent form must be signed" };
+        }
+
+        if (!signatureMatchesBookingName(signature, name)) {
+            return { error: "Consent signature must match booking name" };
+        }
+
+        for (const type of missing) {
+            const validated = validateConsentAnswers(type, consent?.answers?.[type]);
+            if (validated.error) {
+                return { error: validated.error };
+            }
+            submissions.push({
+                type,
+                answers: validated.answers,
+                signature,
+                signedAt: new Date(),
+                name: String(name || "").trim(),
+                email: normalizedEmail,
+                phone: String(phone || "").trim()
+            });
+        }
+
+        if (normalizedEmail) {
+            for (const submission of submissions) {
+                const inserted = await db.query(
+                    `INSERT INTO consent_form_signatures
+                        (email, form_type, form_version, signature, answers, verified, client_name, client_phone, email_attempts)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0)
+                     RETURNING id`,
+                    [
+                        normalizedEmail,
+                        submission.type,
+                        CONSENT_FORMS[submission.type].version,
+                        signature,
+                        JSON.stringify(submission.answers),
+                        Boolean(verified),
+                        submission.name,
+                        submission.phone
+                    ]
+                );
+                submission.id = inserted.rows[0].id;
+            }
+        }
+    } else {
+        const latest = Array.from(onFile.values()).sort(
+            (a, b) => new Date(b.signedAt) - new Date(a.signedAt)
+        )[0];
+        signature = latest?.signature || String(name || "").trim();
+    }
+
+    const summary = requiredTypes
+        .map((type) => {
+            const record = onFile.get(type);
+            const status = record
+                ? `on file since ${new Date(record.signedAt).toISOString().slice(0, 10)}`
+                : "signed with this booking";
+            return `${CONSENT_FORMS[type].title} (${status})`;
+        })
+        .join("; ");
+
+    return { signature, summary, submissions };
+}
+
+// Emails the owner each newly signed form in full, with the client's answers.
+const CONSENT_EMAIL_MAX_ATTEMPTS = 12;
+const CONSENT_EMAIL_RETRY_INTERVAL_MS = 15 * 60 * 1000;
+
+function isConsentEmailConfigured() {
+    return Boolean(String(process.env.INTERNAL_NOTIFICATION_EMAIL || "").trim()) && hasEmailTransportCredentials();
+}
+
+async function deliverConsentEmail(submission) {
+    await sendMailWithSendGrid({
+        from: EMAIL_FROM,
+        to: String(process.env.INTERNAL_NOTIFICATION_EMAIL || "").trim(),
+        subject: `Signed Consent Form: ${CONSENT_FORMS[submission.type].title} - ${submission.name}`,
+        html: renderConsentFormEmailHtml(submission.type, submission)
+    });
+}
+
+async function recordConsentEmailResult(id, error) {
+    if (!id) {
+        return;
+    }
+
+    try {
+        if (error) {
+            await pool.query(
+                "UPDATE consent_form_signatures SET email_attempts = COALESCE(email_attempts, 0) + 1, email_last_error = $2 WHERE id = $1",
+                [id, String(error?.message || error).slice(0, 300)]
+            );
+        } else {
+            await pool.query(
+                "UPDATE consent_form_signatures SET email_sent_at = NOW(), email_last_error = NULL WHERE id = $1",
+                [id]
+            );
+        }
+    } catch (dbError) {
+        console.error("Consent email status update error:", dbError);
+    }
+}
+
+// Tries a few times right away; anything still unsent is flagged and retried by the background job.
+async function sendConsentFormEmails(submissions) {
+    if (!submissions?.length) {
+        return;
+    }
+
+    if (!isConsentEmailConfigured()) {
+        console.error("Consent form email skipped: INTERNAL_NOTIFICATION_EMAIL or email transport is not configured");
+        return;
+    }
+
+    for (const submission of submissions) {
+        let lastError = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            if (attempt > 0) {
+                await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+            }
+
+            try {
+                await deliverConsentEmail(submission);
+                lastError = null;
+                break;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        if (lastError) {
+            console.error("Consent form email error:", lastError);
+        }
+        await recordConsentEmailResult(submission.id, lastError);
+    }
+}
+
+async function loadConsentSubmission(row) {
+    let answers = null;
+    try {
+        answers = row.answers ? JSON.parse(row.answers) : null;
+    } catch (parseError) {
+        answers = null;
+    }
+
+    let name = row.client_name;
+    let phone = row.client_phone;
+    if (!name) {
+        const contact = await pool.query(
+            "SELECT name, phone FROM appointments WHERE LOWER(email) = $1 ORDER BY id DESC LIMIT 1",
+            [row.email]
+        );
+        name = contact.rows[0]?.name || row.signature;
+        phone = phone || contact.rows[0]?.phone || "";
+    }
+
+    return {
+        hasAnswers: Boolean(answers),
+        submission: {
+            id: row.id,
+            type: row.form_type,
+            answers: answers || {},
+            name,
+            email: row.email,
+            phone: phone || "",
+            signature: row.signature,
+            signedAt: row.signed_at
+        }
+    };
+}
+
+let consentEmailRetryRunning = false;
+
+async function retryUnsentConsentEmails() {
+    if (consentEmailRetryRunning || !isConsentEmailConfigured()) {
+        return;
+    }
+
+    consentEmailRetryRunning = true;
+    try {
+        const pending = await pool.query(
+            `SELECT id, email, form_type, signature, signed_at, answers, client_name, client_phone
+             FROM consent_form_signatures
+             WHERE email_sent_at IS NULL AND email_attempts IS NOT NULL AND email_attempts < $1
+               AND signed_at < NOW() - INTERVAL '5 minutes'
+             ORDER BY signed_at
+             LIMIT 20`,
+            [CONSENT_EMAIL_MAX_ATTEMPTS]
+        );
+
+        for (const row of pending.rows) {
+            if (!CONSENT_FORMS[row.form_type]) {
+                continue;
+            }
+
+            let sendError = null;
+            try {
+                const { submission } = await loadConsentSubmission(row);
+                await deliverConsentEmail(submission);
+            } catch (error) {
+                sendError = error;
+                console.error("Consent form email retry error:", error);
+            }
+            await recordConsentEmailResult(row.id, sendError);
+        }
+    } catch (error) {
+        console.error("Consent email retry job error:", error);
+    } finally {
+        consentEmailRetryRunning = false;
+    }
 }
 
 function formatDateISO(date) {
@@ -877,7 +1174,7 @@ function getServicesTotalDuration(services) {
     return services.reduce((sum, service) => sum + service.duration, 0);
 }
 
-// Business hours mirror the booking UI: 9:00 AM open, 15-minute slots, 5:30 PM default close.
+// Business hours mirror the booking UI: 9:00 AM open, 15-minute slots, 8:00 PM default close.
 const BUSINESS_TIME_ZONE = "America/New_York";
 const BUSINESS_OPEN_MINUTES = 9 * 60;
 const BUSINESS_SLOT_INTERVAL_MINUTES = 15;
@@ -1582,6 +1879,13 @@ function getAuthenticatedClientForRewards(req, res) {
     return payload;
 }
 
+// True only when the request carries a valid client session for exactly this email.
+function isSignedInAs(req, res, email) {
+    const client = getAuthenticatedClientForRewards(req, res);
+    const normalized = normalizeEmail(email);
+    return Boolean(client) && Boolean(normalized) && normalizeEmail(client.email) === normalized;
+}
+
 function requireCsrf(req, res, next) {
     const csrfCookie = readCookie(req, CLIENT_CSRF_COOKIE);
     const csrfHeader = String(req.headers["x-csrf-token"] || "").trim();
@@ -1846,6 +2150,48 @@ app.get("/api/booking/preview-specials", async (req, res) => {
     }
 });
 
+// Reports which consent forms a booking needs and which are already valid for this email
+app.post("/api/consent/required", async (req, res) => {
+    try {
+        const services = sanitizeServices(req.body?.services);
+        if (!services) {
+            return res.status(400).json({ error: "Missing or invalid services" });
+        }
+
+        const email = normalizeEmail(req.body?.email);
+        const requiredTypes = getRequiredConsentTypes(services.map((service) => service.id));
+        const onFile = await getValidConsentRecords(
+            pool,
+            email,
+            requiredTypes,
+            isSignedInAs(req, res, email)
+        );
+
+        res.json({
+            forms: requiredTypes.map((type) => {
+                const form = CONSENT_FORMS[type];
+                const record = onFile.get(type);
+                return record
+                    ? {
+                          type,
+                          title: form.title,
+                          onFile: true,
+                          signedAt: record.signedAt,
+                          validUntil: record.validUntil
+                      }
+                    : {
+                          type,
+                          title: form.title,
+                          onFile: false,
+                          items: form.items
+                      };
+            })
+        });
+    } catch (err) {
+        return sendInternalError(res, "Consent required error:", err);
+    }
+});
+
 // Free booking path: skip Stripe when a free-booking promotion applies
 app.post("/api/free-booking", async (req, res) => {
     try {
@@ -1864,20 +2210,24 @@ app.post("/api/free-booking", async (req, res) => {
         const selectedSpecialTypes = hasSelectedSpecialTypes && Array.isArray(req.body?.selectedSpecialTypes)
             ? req.body.selectedSpecialTypes
             : null;
-        const consentAccepted = consent?.accepted === true;
-        const consentSignature = String(consent?.signature || "").trim();
-
-        if (!consentAccepted || consentSignature.length < 2) {
-            return res.status(400).json({ error: "Consent form must be signed" });
-        }
-
-        if (!signatureMatchesBookingName(consentSignature, customerName)) {
-            return res.status(400).json({ error: "Consent signature must match booking name" });
-        }
 
         if (!isValidDate(date) || !isValidTime(time) || !sanitizedServices) {
             return res.status(400).json({ error: "Missing or invalid fields" });
         }
+
+        const consentResult = await resolveBookingConsent(pool, {
+            email: customerEmail,
+            name: customerName,
+            phone: customerPhone,
+            services: sanitizedServices,
+            consent,
+            verified: isSignedInAs(req, res, customerEmail)
+        });
+        if (consentResult.error) {
+            return res.status(400).json({ error: consentResult.error });
+        }
+        sendConsentFormEmails(consentResult.submissions);
+        const consentSignature = consentResult.signature;
 
         const authenticatedClient = getAuthenticatedClientForRewards(req, res);
         const sessionEmail = normalizeEmail(authenticatedClient?.email || "");
@@ -1982,7 +2332,8 @@ app.post("/api/free-booking", async (req, res) => {
             phone: customerPhone,
             services: sanitizedServices,
             totalPaidCents: 0,
-            consentSignature
+            consentSignature,
+            consentSummary: consentResult.summary
         }).catch((e) => console.error("Internal booking notify error:", e));
 
         // Send confirmation email
@@ -2031,19 +2382,9 @@ app.post("/api/create-payment-intent", async (req, res) => {
         const selectedSpecialTypes = hasSelectedSpecialTypes && Array.isArray(req.body?.selectedSpecialTypes)
             ? req.body.selectedSpecialTypes
             : null;
-        const consentAccepted = consent?.accepted === true;
-        const consentSignature = String(consent?.signature || "").trim();
 
         if (!Number.isInteger(parsedAmount) || parsedAmount <= 0) {
             return res.status(400).json({ error: "Invalid amount" });
-        }
-
-        if (!consentAccepted || consentSignature.length < 2) {
-            return res.status(400).json({ error: "Consent form must be signed" });
-        }
-
-        if (!signatureMatchesBookingName(consentSignature, customerName)) {
-            return res.status(400).json({ error: "Consent signature must match booking name" });
         }
 
         if (referralEmail && !/^\S+@\S+\.\S+$/.test(referralEmail)) {
@@ -2053,6 +2394,20 @@ app.post("/api/create-payment-intent", async (req, res) => {
         if (!isValidDate(date) || !isValidTime(time) || !sanitizedServices) {
             return res.status(400).json({ error: "Missing or invalid fields" });
         }
+
+        const consentResult = await resolveBookingConsent(pool, {
+            email: customerEmail,
+            name: customerName,
+            phone: customerPhone,
+            services: sanitizedServices,
+            consent,
+            verified: isSignedInAs(req, res, customerEmail)
+        });
+        if (consentResult.error) {
+            return res.status(400).json({ error: consentResult.error });
+        }
+        sendConsentFormEmails(consentResult.submissions);
+        const consentSignature = consentResult.signature;
 
         const authenticatedClient = getAuthenticatedClientForRewards(req, res);
         const sessionEmail = normalizeEmail(authenticatedClient?.email || "");
@@ -2165,8 +2520,9 @@ app.post("/api/create-payment-intent", async (req, res) => {
                                phone: customerPhone,
                 referralEmail: appliedReferralEmail,
                 timezone,
-                consentAccepted: String(consentAccepted),
+                consentAccepted: "true",
                 consentSignature,
+                consentSummary: consentResult.summary.slice(0, 480),
                 appliedSpecials: JSON.stringify(specialsResult.specials.map((s) => s.type)),
                 discountCents: String(specialsResult.flatDiscountCents + Object.entries(specialsResult.priceOverridesCents).reduce((sum, [id, overrideCents]) => {
                     const svc = sanitizedServices.find((s) => s.id === id);
@@ -2220,6 +2576,7 @@ app.post("/api/confirm-booking", async (req, res) => {
             timezone,
             consentAccepted,
             consentSignature,
+            consentSummary,
             appliedSpecials: metaAppliedSpecials,
             discountCents: metaDiscountCents
         } =
@@ -2377,7 +2734,8 @@ app.post("/api/confirm-booking", async (req, res) => {
             phone: appointmentPhone,
             services: servicesList,
             totalPaidCents: Number(session.amount_total) || 0,
-            consentSignature: signedConsentName
+            consentSignature: signedConsentName,
+            consentSummary
         }).catch((e) => {
             console.error("Internal booking notify error:", e);
         });
@@ -3814,14 +4172,6 @@ app.post("/api/wax-passes/purchase", requireClient, requireCsrf, async (req, res
         const tierNum = Number(tier);
         if (![1, 2, 3].includes(tierNum)) return res.status(400).json({ error: "Invalid tier" });
         const customerName = String(customer?.name || "").trim();
-        const consentAccepted = consent?.accepted === true;
-        const consentSignature = String(consent?.signature || "").trim();
-        if (!consentAccepted || consentSignature.length < 2) {
-            return res.status(400).json({ error: "Consent form must be signed" });
-        }
-        if (!signatureMatchesBookingName(consentSignature, customerName)) {
-            return res.status(400).json({ error: "Consent signature must match booking name" });
-        }
 
         const tierInfo = WAX_PASS_TIERS[tierNum];
         const allowedIds = getWaxPassServiceIds(tierNum);
@@ -3834,6 +4184,19 @@ app.post("/api/wax-passes/purchase", requireClient, requireCsrf, async (req, res
         const totalPriceCents = priceCents * tierInfo.paid;
         const clientId = req.clientAuth.clientId || req.clientAuth.id;
         const customerEmail = normalizeEmail(customer?.email || req.clientAuth?.email || "");
+
+        const consentResult = await resolveBookingConsent(pool, {
+            email: customerEmail,
+            name: customerName,
+            phone: customer?.phone,
+            services: [svc],
+            consent,
+            verified: normalizeEmail(req.clientAuth?.email || "") === customerEmail
+        });
+        if (consentResult.error) {
+            return res.status(400).json({ error: consentResult.error });
+        }
+        sendConsentFormEmails(consentResult.submissions);
 
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
@@ -3892,15 +4255,11 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
         if (!Number.isInteger(passId)) return res.status(400).json({ error: "Invalid pass ID" });
         const clientId = req.clientAuth.clientId || req.clientAuth.id;
         const { date, time, timezone, phone, consent } = req.body || {};
-        const consentAccepted = consent?.accepted === true;
-        const consentSignature = String(consent?.signature || "").trim();
-        if (!consentAccepted || consentSignature.length < 2) {
-            return res.status(400).json({ error: "Consent form must be signed" });
-        }
         if (!isValidDate(date) || !isValidTime(time)) {
             return res.status(400).json({ error: "Valid date and time are required" });
         }
 
+        let consentResult = null;
         const bookingResult = await withAppointmentLocks([getAppointmentDateLockKey(date)], async (db) => {
             const passRows = await db.query(
                 `SELECT wp.*, c.name, c.email
@@ -3915,8 +4274,16 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
             if (pass.status !== "active") {
                 const e = new Error("Wax pass is not active"); e.statusCode = 400; throw e;
             }
-            if (!signatureMatchesBookingName(consentSignature, pass.name)) {
-                const e = new Error("Consent signature must match booking name"); e.statusCode = 400; throw e;
+            consentResult = await resolveBookingConsent(db, {
+                email: pass.email,
+                name: pass.name,
+                phone,
+                services: [{ id: pass.service_id }],
+                consent,
+                verified: true
+            });
+            if (consentResult.error) {
+                const e = new Error(consentResult.error); e.statusCode = 400; throw e;
             }
             const remainingCredits = pass.total_credits - pass.used_credits;
             if (remainingCredits <= 0) {
@@ -3977,6 +4344,8 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
             };
         });
 
+        sendConsentFormEmails(consentResult?.submissions);
+
         try {
             await sendMailWithSendGrid({
                 from: EMAIL_FROM,
@@ -4004,7 +4373,8 @@ app.post("/api/client/wax-passes/:passId/book", requireClient, requireCsrf, asyn
             email: bookingResult.email,
             phone: phone || "",
             services: [{ name: bookingResult.serviceName }],
-            consentSignature
+            consentSignature: consentResult.signature,
+            consentSummary: consentResult.summary
         }).catch((e) => {
             console.error("Internal booking notify error:", e);
         });
@@ -4039,6 +4409,117 @@ app.get("/api/admin/wax-passes", requireAdmin, async (req, res) => {
     }
 });
 
+// GET /api/admin/consent-forms?q= — signed consent forms, newest first
+app.get("/api/admin/consent-forms", requireAdmin, async (req, res) => {
+    try {
+        const search = String(req.query.q || "").trim().slice(0, 100);
+        const rows = await pool.query(
+            `SELECT id, email, form_type, form_version, signature, signed_at, verified,
+                    email_attempts, email_sent_at, email_last_error,
+                    signed_at + make_interval(months => $2::int) AS valid_until,
+                    signed_at > NOW() - make_interval(months => $2::int) AS is_current
+             FROM consent_form_signatures
+             WHERE $1 = '' OR strpos(LOWER(email), LOWER($1)) > 0 OR strpos(LOWER(signature), LOWER($1)) > 0
+             ORDER BY signed_at DESC
+             LIMIT 500`,
+            [search, CONSENT_VALIDITY_MONTHS]
+        );
+
+        res.json(
+            rows.rows.map((row) => ({
+                id: row.id,
+                email: row.email,
+                formType: row.form_type,
+                formTitle: CONSENT_FORMS[row.form_type]?.title || row.form_type,
+                formVersion: row.form_version,
+                signature: row.signature,
+                signedAt: row.signed_at,
+                validUntil: row.valid_until,
+                isCurrent: row.is_current,
+                verified: row.verified === true,
+                emailStatus:
+                    row.email_sent_at
+                        ? "sent"
+                        : row.email_attempts === null
+                          ? "unknown"
+                          : row.email_attempts >= CONSENT_EMAIL_MAX_ATTEMPTS
+                            ? "failed"
+                            : "pending",
+                emailAttempts: row.email_attempts,
+                emailLastError: row.email_last_error
+            }))
+        );
+    } catch (err) {
+        return sendInternalError(res, "Admin consent forms error:", err);
+    }
+});
+
+// GET /api/admin/consent-forms/:id — the full signed form with the client's answers
+app.get("/api/admin/consent-forms/:id", requireAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) {
+            return res.status(400).json({ error: "Invalid consent form ID" });
+        }
+
+        const result = await pool.query(
+            "SELECT id, email, form_type, signature, signed_at, answers, client_name, client_phone FROM consent_form_signatures WHERE id = $1",
+            [id]
+        );
+        const row = result.rows[0];
+        if (!row || !CONSENT_FORMS[row.form_type]) {
+            return res.status(404).json({ error: "Consent form not found" });
+        }
+
+        const { hasAnswers, submission } = await loadConsentSubmission(row);
+        const html = renderConsentFormEmailHtml(row.form_type, submission);
+
+        res.json({
+            id: row.id,
+            html: hasAnswers ? html : `<p><em>No answers were stored for this signature.</em></p>${html}`
+        });
+    } catch (err) {
+        return sendInternalError(res, "Admin consent form detail error:", err);
+    }
+});
+
+// POST /api/admin/consent-forms/:id/resend — emails the owner a copy of this form now
+app.post("/api/admin/consent-forms/:id/resend", requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) {
+            return res.status(400).json({ error: "Invalid consent form ID" });
+        }
+
+        if (!isConsentEmailConfigured()) {
+            return res.status(503).json({ error: "Owner email is not configured on the server" });
+        }
+
+        const result = await pool.query(
+            "SELECT id, email, form_type, signature, signed_at, answers, client_name, client_phone FROM consent_form_signatures WHERE id = $1",
+            [id]
+        );
+        const row = result.rows[0];
+        if (!row || !CONSENT_FORMS[row.form_type]) {
+            return res.status(404).json({ error: "Consent form not found" });
+        }
+
+        try {
+            const { submission } = await loadConsentSubmission(row);
+            await deliverConsentEmail(submission);
+        } catch (sendError) {
+            console.error("Consent form resend error:", sendError);
+            await recordConsentEmailResult(id, sendError);
+            return res.status(502).json({ error: "Unable to send the email. Please try again later." });
+        }
+
+        await recordConsentEmailResult(id, null);
+        res.json({ success: true });
+    } catch (err) {
+        return sendInternalError(res, "Admin consent form resend error:", err);
+    }
+});
+
 app.use(
     express.static(path.join(__dirname), {
         dotfiles: "deny",
@@ -4048,3 +4529,5 @@ app.use(
 
 // Start server
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
+setInterval(retryUnsentConsentEmails, CONSENT_EMAIL_RETRY_INTERVAL_MS).unref();

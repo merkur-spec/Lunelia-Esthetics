@@ -1568,6 +1568,73 @@ table {
     font-size: 14px;
 }
 
+.consent-form-block {
+    margin: 16px 0;
+    padding: 12px;
+    border: 1px solid #dfeee3;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.consent-form-block h4 {
+    margin: 0 0 8px;
+}
+
+.consent-detail {
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid #dfeee3;
+    border-radius: 8px;
+    background: #fff;
+    text-align: left;
+}
+
+.consent-detail[hidden] {
+    display: none;
+}
+
+.consent-email-flag {
+    color: #b00020;
+    font-weight: 600;
+}
+
+.consent-form-block p {
+    margin: 0 0 8px;
+}
+
+.consent-form-block h5 {
+    margin: 14px 0 6px;
+    font-size: 15px;
+}
+
+.consent-item {
+    margin: 12px 0;
+}
+
+.consent-item[hidden] {
+    display: none;
+}
+
+.consent-question {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.consent-option {
+    display: block;
+    margin: 4px 0;
+    font-weight: 400;
+}
+
+.consent-item input[type="text"],
+.consent-item input[type="number"],
+.consent-item textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .consent-check input[type="checkbox"] {
     margin-top: 4px;
 }
@@ -1579,7 +1646,7 @@ table {
 }
 
 .consent-page .admin-login-section {
-    width: min(560px, 100%);
+    width: min(760px, 100%);
     margin: 0 auto;
 }
 
